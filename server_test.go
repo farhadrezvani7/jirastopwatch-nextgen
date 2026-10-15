@@ -165,3 +165,42 @@ func TestGuardRejectsForeignHostAndMissingToken(t *testing.T) {
 		}
 	}
 }
+
+// A remembered sign-in must survive an app restart: the page logs in again with an empty body.
+func TestRememberedLoginSurvivesRestart(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	jsrv := httptest.NewServer(&fakeJira{})
+	defer jsrv.Close()
+
+	post := func(s *server, path, body string) (int, map[string]any) {
+		req := httptest.NewRequest("POST", path, strings.NewReader(body))
+		req.Host = "127.0.0.1"
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, req)
+		var m map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&m)
+		return w.Code, m
+	}
+
+	first := newServer()
+	if c, m := post(first, "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p","remember":true}`); c != 200 {
+		t.Fatalf("login %d %v", c, m)
+	}
+
+	second := newServer() // "reopen the app"
+	if second.cfg.Token == "" {
+		t.Fatal("token was not remembered")
+	}
+	if c, m := post(second, "/api/login", `{}`); c != 200 {
+		t.Fatalf("auto sign-in with saved credentials: %d %v", c, m)
+	}
+
+	// Signing out forgets the token, and an empty login then fails.
+	post(second, "/api/logout", "")
+	if c, _ := post(newServer(), "/api/login", `{}`); c == 200 {
+		t.Error("signed-out user was logged in again")
+	}
+}

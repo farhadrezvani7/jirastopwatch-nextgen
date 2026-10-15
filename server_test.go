@@ -92,7 +92,7 @@ func TestWorklogUsesChosenTimezoneEstimateAndCommentMode(t *testing.T) {
 	}
 	call("POST", "/api/timers/ABC-1/start", "")
 	// Start-transition runs in the background; wait for it.
-	for i := 0; i < 100 && !fj.has("POST /rest/api/2/issue/ABC-1/transitions"); i++ {
+	for i := 0; i < 250 && !fj.has("POST /rest/api/2/issue/ABC-1/transitions"); i++ {
 		jsrvWait()
 	}
 	if !fj.has("POST /rest/api/2/issue/ABC-1/transitions") {

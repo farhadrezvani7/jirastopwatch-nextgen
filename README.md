@@ -23,34 +23,31 @@ Start a timer on an issue, work, press **Log work** — the time lands in Jira a
 
 ---
 
-## Install (the simple way)
+## Install (two clicks)
 
-You only need a Chromium-based browser that is already on almost every computer: **Edge** (pre-installed on Windows 10/11), **Chrome**, **Brave** or **Chromium**. No installer, no runtime, no admin rights.
+You only need a Chromium-based browser that is already on almost every computer: **Edge** (pre-installed on Windows 10/11), **Chrome**, **Brave** or **Chromium**. No runtime, no admin rights, no terminal.
 
 Download the file for your system from the [**Releases**](https://github.com/farhadrezvani7/jirastopwatch-nextgen/releases/latest) page:
 
 ### Windows
-1. Download `jirastopwatch-nextgen-windows-amd64.exe` (use `…-arm64.exe` on ARM PCs).
-2. Double-click it. The first time, Windows SmartScreen may say *“Windows protected your PC”* because the file is not code-signed: click **More info → Run anyway**.
+1. Download `jirastopwatch-nextgen-windows-amd64-setup.exe` (use `…-arm64-setup.exe` on ARM PCs).
+2. Double-click it → **Next** → **Finish**. You get a Start Menu entry and a desktop shortcut; remove it any time from *Settings → Apps*.
+   The first time, SmartScreen may say *“Windows protected your PC”* because the file is not code-signed: click **More info → Run anyway**.
 
 ### macOS
-1. Download `jirastopwatch-nextgen-darwin-arm64` (Apple Silicon: M1/M2/M3/M4) or `…-darwin-amd64` (Intel Mac).
-2. Open **Terminal** and run (replace the name if you downloaded the Intel build):
-   ```bash
-   cd ~/Downloads
-   chmod +x jirastopwatch-nextgen-darwin-arm64
-   xattr -d com.apple.quarantine jirastopwatch-nextgen-darwin-arm64
-   ./jirastopwatch-nextgen-darwin-arm64
-   ```
+1. Download `jirastopwatch-nextgen-macos-arm64.zip` (Apple Silicon: M1–M4) or `…-macos-amd64.zip` (Intel).
+2. Open the zip and drag **Jira StopWatch NextGen** into **Applications**.
+3. First launch only: because the app is not notarized, macOS blocks it. Open it once, then go to **System Settings → Privacy & Security → Open Anyway**. (On older macOS: right-click the app → **Open**.)
 
 ### Linux
-1. Download `jirastopwatch-nextgen-linux-amd64` (or `…-arm64` for Raspberry Pi / ARM).
-2. Run:
-   ```bash
-   chmod +x jirastopwatch-nextgen-linux-amd64
-   ./jirastopwatch-nextgen-linux-amd64
-   ```
-3. Optional — add it to your applications menu: `git clone` this repo and run `./install.sh` (needs Go).
+- **Ubuntu / Debian / Mint:** download `jirastopwatch-nextgen-linux-amd64.deb` (or `…-arm64.deb`), double-click it and press **Install** in the software center.
+- **Fedora / openSUSE:** download the `.rpm` the same way.
+- **Any distro, one line** (installs for your user only, no root):
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/farhadrezvani7/jirastopwatch-nextgen/main/install.sh | bash
+  ```
+  Afterwards search for **Jira StopWatch NextGen** in your applications menu. The terminal is only needed for this one command; the app runs on its own.
+- Already downloaded the plain `jirastopwatch-nextgen-linux-*` binary? `chmod +x` it and run it with `--install`; remove again with `--uninstall`.
 
 > No Chromium-based browser? The app opens in your default browser instead and quits when you close the tab.
 
@@ -61,7 +58,7 @@ cd jirastopwatch-nextgen
 go build -o jirastopwatch-nextgen .        # needs Go 1.24+
 ./jirastopwatch-nextgen
 ```
-On Windows run `.\install.ps1` to also get a Start Menu shortcut; `./build-all.sh` cross-compiles every platform into `dist/`.
+On Windows run `.\install.ps1` to also get a Start Menu shortcut; `./build-all.sh` cross-compiles every platform and builds the installers into `dist/` (needs `nfpm`, `makensis` and `zip` for the installers).
 
 ---
 

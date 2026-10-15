@@ -12,11 +12,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y nsis zip
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.41.1
       - name: Build all platforms
         run: |
           VERSION="${GITHUB_REF_NAME#v}" UPDATE_REPO="${GITHUB_REPOSITORY}" ./build-all.sh
       - name: Check macOS binaries can start
-        run: python3 scripts/check-macho.py dist/jirastopwatch-nextgen-darwin-*
+        run: python3 scripts/check-macho.py dist/jirastopwatch-nextgen-darwin-amd64 dist/jirastopwatch-nextgen-darwin-arm64
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

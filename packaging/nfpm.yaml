@@ -1,0 +1,19 @@
+# Linux .deb / .rpm. Built by build-all.sh; ARCH, VERSION and BIN come from the environment.
+name: jirastopwatch-nextgen
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+maintainer: Farhad Rezvani
+description: Fast, modern time tracker for Jira.
+homepage: https://github.com/farhadrezvani7/jirastopwatch-nextgen
+license: Apache-2.0
+contents:
+  - src: ${BIN}
+    dst: /usr/bin/jirastopwatch-nextgen
+    file_info: { mode: 0755 }
+  - src: packaging/jirastopwatch-nextgen.desktop
+    dst: /usr/share/applications/jirastopwatch-nextgen.desktop
+    file_info: { mode: 0644 }
+  - src: packaging/icon.png
+    dst: /usr/share/icons/hicolor/512x512/apps/jirastopwatch-nextgen.png
+    file_info: { mode: 0644 }

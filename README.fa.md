@@ -21,43 +21,36 @@ JiraStopWatch NextGen بر پایه‌ی هسته‌ی پروژه‌ی متن‌
 
 ---
 
-## نصب (ساده‌ترین روش)
+## نصب (با دو کلیک)
 
-فقط یک مرورگر مبتنی بر Chromium لازم است که تقریباً روی همه‌ی کامپیوترها هست: **Edge** (روی ویندوز ۱۰ و ۱۱ از قبل نصب است)، **Chrome**، **Brave** یا **Chromium**. نه نصب‌کننده می‌خواهد، نه runtime، نه دسترسی ادمین.
+فقط یک مرورگر مبتنی بر Chromium لازم است که تقریباً روی همه‌ی کامپیوترها هست: **Edge** (روی ویندوز ۱۰ و ۱۱ از قبل نصب است)، **Chrome**، **Brave** یا **Chromium**. نه runtime می‌خواهد، نه دسترسی ادمین، نه ترمینال.
 
 فایل مخصوص سیستم‌تان را از صفحه‌ی [**Releases**](https://github.com/farhadrezvani7/jirastopwatch-nextgen/releases/latest) دانلود کنید:
 
 ### ویندوز
-۱. فایل `jirastopwatch-nextgen-windows-amd64.exe` را دانلود کنید (روی کامپیوترهای ARM فایل `…-arm64.exe`).
-۲. روی آن دوبار کلیک کنید. بار اول ممکن است SmartScreen پیام *Windows protected your PC* بدهد (چون فایل امضای دیجیتال ندارد): روی **More info ← Run anyway** بزنید.
+۱. فایل `jirastopwatch-nextgen-windows-amd64-setup.exe` را دانلود کنید (روی کامپیوترهای ARM فایل `…-arm64-setup.exe`).
+۲. روی آن دوبار کلیک کنید ← **Next** ← **Finish**. برنامه در Start Menu و روی دسکتاپ می‌آید و هر زمان از *Settings ← Apps* حذف می‌شود.
+   بار اول ممکن است SmartScreen پیام *Windows protected your PC* بدهد (چون فایل امضای دیجیتال ندارد): روی **More info ← Run anyway** بزنید.
 
 ### مک
-۱. فایل `jirastopwatch-nextgen-darwin-arm64` (مک‌های Apple Silicon: M1 تا M4) یا `…-darwin-amd64` (مک اینتل) را دانلود کنید.
-۲. **Terminal** را باز کنید و بزنید:
-</div>
-
-```bash
-cd ~/Downloads
-chmod +x jirastopwatch-nextgen-darwin-arm64
-xattr -d com.apple.quarantine jirastopwatch-nextgen-darwin-arm64
-./jirastopwatch-nextgen-darwin-arm64
-```
-
-<div dir="rtl">
+۱. فایل `jirastopwatch-nextgen-macos-arm64.zip` (مک‌های Apple Silicon: M1 تا M4) یا `…-macos-amd64.zip` (مک اینتل) را دانلود کنید.
+۲. زیپ را باز کنید و برنامه‌ی **Jira StopWatch NextGen** را به پوشه‌ی **Applications** بکشید.
+۳. فقط بار اول: چون برنامه notarize نشده، macOS جلوی آن را می‌گیرد. یک بار آن را باز کنید، بعد به **System Settings ← Privacy & Security ← Open Anyway** بروید. (در macOS قدیمی‌تر: روی برنامه راست‌کلیک ← **Open**.)
 
 ### لینوکس
-۱. فایل `jirastopwatch-nextgen-linux-amd64` (یا `…-arm64` برای Raspberry Pi و ARM) را دانلود کنید.
-۲. اجرا کنید:
+- **اوبونتو / دبیان / مینت:** فایل `jirastopwatch-nextgen-linux-amd64.deb` (یا `…-arm64.deb`) را دانلود کنید، روی آن دوبار کلیک کنید و در نرم‌افزار سنتر **Install** بزنید.
+- **فدورا / openSUSE:** فایل `.rpm` را به همین شکل نصب کنید.
+- **هر توزیعی، با یک خط** (فقط برای کاربر خودتان، بدون root):
 </div>
 
 ```bash
-chmod +x jirastopwatch-nextgen-linux-amd64
-./jirastopwatch-nextgen-linux-amd64
+curl -fsSL https://raw.githubusercontent.com/farhadrezvani7/jirastopwatch-nextgen/main/install.sh | bash
 ```
 
 <div dir="rtl">
 
-۳. اختیاری — افزودن به منوی برنامه‌ها: مخزن را `git clone` کنید و `./install.sh` را اجرا کنید (به Go نیاز دارد).
+  بعد از آن در منوی برنامه‌ها دنبال **Jira StopWatch NextGen** بگردید. ترمینال فقط برای همین یک دستور لازم است و خود برنامه مستقل اجرا می‌شود.
+- فایل ساده‌ی `jirastopwatch-nextgen-linux-*` را دانلود کرده‌اید؟ با `chmod +x` اجرایی‌اش کنید و با `--install` اجرا کنید؛ حذف: `--uninstall`.
 
 > مرورگر Chromium ندارید؟ برنامه در مرورگر پیش‌فرض باز می‌شود و با بستن آن تب، بسته می‌شود.
 

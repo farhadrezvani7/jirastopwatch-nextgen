@@ -23,7 +23,21 @@ import (
 
 func main() {
 	noOpen := flag.Bool("no-open", false, "don't open a window; just print the URL")
+	install := flag.Bool("install", false, "add to the applications menu (Linux)")
+	uninstall := flag.Bool("uninstall", false, "remove from the applications menu (Linux)")
 	flag.Parse()
+	if *install || *uninstall {
+		if runtime.GOOS != "linux" {
+			fmt.Println("--install is only needed on Linux; use the installer or .app from the Releases page.")
+			return
+		}
+		msg, err := installDesktop(*uninstall)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(msg)
+		return
+	}
 
 	s := newServer()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

@@ -213,3 +213,15 @@ func TestRememberedLoginSurvivesRestart(t *testing.T) {
 		t.Error("signed-out user was logged in again")
 	}
 }
+
+// The worklog should end when it is logged: 3 AM Tehran + 1h30m of work starts at 01:30, not when the timer was first started.
+func TestDefaultStartEndsNow(t *testing.T) {
+	tehran, _ := time.LoadLocation("Asia/Tehran")
+	now := time.Date(2026, 10, 16, 3, 0, 20, 0, tehran)
+	if got := defaultStart(now, 89*time.Minute+10*time.Second).In(tehran).Format(localLayout); got != "2026-10-16T01:30" {
+		t.Errorf("default start = %s, want 2026-10-16T01:30", got)
+	}
+	if got := defaultStart(now, 0).In(tehran).Format(localLayout); got != "2026-10-16T02:59" {
+		t.Errorf("empty timer start = %s", got)
+	}
+}

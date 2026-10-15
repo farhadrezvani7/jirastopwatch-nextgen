@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,7 +26,13 @@ func main() {
 	noOpen := flag.Bool("no-open", false, "don't open a window; just print the URL")
 	install := flag.Bool("install", false, "add to the applications menu (Linux)")
 	uninstall := flag.Bool("uninstall", false, "remove from the applications menu (Linux)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("jirastopwatch-nextgen " + version)
+		return
+	}
+	removeOldBinary()
 	if *install || *uninstall {
 		if runtime.GOOS != "linux" {
 			fmt.Println("--install is only needed on Linux; use the installer or .app from the Releases page.")
@@ -58,22 +65,32 @@ func main() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
 	done := make(chan struct{})
+	finish := sync.OnceFunc(func() { close(done) })
+	s.setQuit(finish) // "install update" shuts the app down; main then starts the new version
 	if *noOpen {
 		fmt.Println(url)
-		go func() { <-sig; close(done) }()
+		go func() { <-sig; finish() }()
 	} else if cmd := appWindow(url); cmd != nil {
-		go func() { _ = cmd.Wait(); close(done) }()
+		go func() { _ = cmd.Wait(); finish() }()
 		go func() { <-sig; _ = cmd.Process.Kill() }()
+		s.setQuit(func() { _ = cmd.Process.Kill(); finish() })
 	} else if openDefaultBrowser(url) {
 		// No app-mode browser: the page is in a normal tab, so quit once it stops pinging.
-		go func() { s.waitForPageGone(3 * time.Minute); close(done) }()
-		go func() { <-sig; close(done) }()
+		go func() { s.waitForPageGone(3 * time.Minute); finish() }()
+		go func() { <-sig; finish() }()
 	} else {
 		fmt.Println("No Chrome/Edge/Chromium found. Open this in a browser:\n" + url)
-		go func() { <-sig; close(done) }()
+		go func() { <-sig; finish() }()
 	}
 	<-done // by default running timers keep counting (wall-clock) and are restored on next launch
 	s.onExit()
+	if exe := s.restartTarget(); exe != "" { // an update was installed: start the new version
+		cmd := exec.Command(exe, os.Args[1:]...)
+		detach(cmd)
+		if err := cmd.Start(); err != nil {
+			log.Println("restart failed:", err)
+		}
+	}
 }
 
 // browserCandidates lists Chromium-family browsers (they all support --app) to

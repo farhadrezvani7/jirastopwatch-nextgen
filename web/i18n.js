@@ -70,6 +70,15 @@ const EN_VALUES = [
 ];
 
 STR.en = Object.fromEntries(KEYS.map((k, i) => [k, EN_VALUES[i]]));
+// Added later; languages without these keys show the English text.
+Object.assign(STR.en, {
+  "menu.update": "Check for updates", "upd.checking": "Checking for updates…", "upd.uptodate": "You have the latest version ({0}).",
+  "upd.title": "Update available", "upd.ask": "Version {latest} is available (you have {current}). Replace the current version with the new one and restart now? Running timers keep counting.",
+  "upd.now": "Update now", "upd.later": "Not now", "upd.installing": "Downloading and installing…",
+  "upd.done": "Updated to {0}. The app is restarting…",
+  "err.updCheck": "Could not check for updates: {0}", "err.updInstall": "The update failed: {0}",
+  "err.updNoWrite": "This copy can't update itself (it is installed in a protected folder). Download the new version here:",
+});
 
 let lang = "en";
 function pickLang(saved) {

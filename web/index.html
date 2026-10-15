@@ -217,6 +217,7 @@ aside{border-inline-start:1px solid var(--line);background:var(--nav);display:fl
         <div class="who"><b id="mName"></b><small id="mSite"></small></div>
         <label class="check"><input type="checkbox" id="optPause"> <span data-i18n="set.pauseOthers"></span></label>
         <button id="openSettings" data-i18n="menu.settings"></button>
+        <button id="checkUpdate" class="hidden" data-i18n="menu.update"></button>
         <hr>
         <button id="signOut" data-i18n="menu.signOut"></button>
       </div>
@@ -478,6 +479,7 @@ async function enterApp(user, sess) {
   $("#mName").textContent = user.displayName;
   $("#mSite").textContent = site.replace(/^https?:\/\//, "");
   $("#optPause").checked = pauseOthers;
+  $("#checkUpdate").classList.toggle("hidden", !prefs.updateEnabled);
   await applyI18n();
   await refresh();
   loadList();
@@ -604,6 +606,16 @@ async function logDialog(x) {
   const mins = Math.max(1, Math.ceil(elapsed(x) / 60));
   const time = el("input", {type: "text", className: "ltr", value: `${Math.floor(mins / 60) ? Math.floor(mins / 60) + "h " : ""}${mins % 60}m`, spellcheck: false});
   const started = el("input", {type: "datetime-local", value: x.startedAt});
+  // "Started" follows the logged time (the work ends now) until the user sets it by hand.
+  let startedByHand = false, startT;
+  started.addEventListener("input", () => { startedByHand = true; });
+  time.addEventListener("input", () => {
+    clearTimeout(startT);
+    startT = setTimeout(async () => {
+      if (startedByHand) return;
+      try { started.value = (await api("GET", "/api/started?time=" + encodeURIComponent(time.value))).started; } catch {}
+    }, 300);
+  });
   const comment = el("textarea", {rows: 3, placeholder: t("log.commentPh"), dir: "auto", value: x.comment || ""});
   let saveT; comment.oninput = () => { clearTimeout(saveT); saveT = setTimeout(() => api("POST", `/api/timers/${x.key}/comment`, {comment: comment.value}).catch(() => {}), 600); };
   const flushDraft = () => { clearTimeout(saveT); return api("POST", `/api/timers/${x.key}/comment`, {comment: comment.value}).catch(() => {}); };
@@ -624,7 +636,7 @@ async function logDialog(x) {
       const r = await api("POST", `/api/timers/${x.key}/log`, {
         time: time.value, started: started.value, comment: comment.value, transition: trans.value,
         estimate: est.value, estimateValue: estVal.value});
-      close(); toast(r.warning ? tr(r.warning) : t("log.done", {time: time.value, key: x.key}), !!r.warning); refresh();
+      close(); toast((r.warning ? tr(r.warning) : t("log.done", {time: time.value, key: x.key})) + `  ·  ${started.value.replace("T", " ")}${zoneInfo ? " " + zoneInfo.name : ""}`, !!r.warning); refresh();
     } catch (ex) { toast(ex.message, true); submit.disabled = false; submit.textContent = t("log.btn"); }
   };
   comment.focus();
@@ -872,6 +884,36 @@ async function checkUpdateBanner() {
   } catch {}
 }
 $("#updx").onclick = () => $("#updbar").classList.add("hidden");
+
+/* ---------- install updates ---------- */
+async function updateFlow() {
+  $("#menu").classList.add("hidden");
+  toast(t("upd.checking"));
+  let u;
+  try { u = await api("POST", "/api/update/check"); } catch (ex) { toast(ex.message, true); return; }
+  if (!u.newer) { toast(t("upd.uptodate", {0: u.current})); return; }
+  const info = el("div", {}, el("p", {textContent: t("upd.ask", {latest: u.latest, current: u.current})}));
+  const status = el("div", {className: "hint"});
+  const go = el("button", {type: "submit", className: "btn", textContent: t("upd.now")});
+  if (!u.canInstall) {
+    go.classList.add("hidden");
+    info.replaceChildren(el("p", {textContent: t("err.updNoWrite")}), el("a", {href: u.url, target: "_blank", rel: "noopener", textContent: u.url, dir: "ltr"}));
+  }
+  info.append(status);
+  const {close, form} = modal(t("upd.title"), u.latest, info, close => [el("button", {type: "button", className: "btn ghost", textContent: t("upd.later"), onclick: close}), go]);
+  form.onsubmit = async e => {
+    e.preventDefault(); go.disabled = true; status.textContent = t("upd.installing");
+    try {
+      const r = await api("POST", "/api/update/apply");
+      status.textContent = t("upd.done", {0: r.version});
+    } catch (ex) {
+      go.disabled = false; status.textContent = ""; status.append(ex.message);
+      if (ex.message === t("err.updNoWrite")) status.append(" ", el("a", {href: u.url, target: "_blank", rel: "noopener", textContent: u.url, dir: "ltr"}));
+    }
+  };
+}
+$("#checkUpdate").onclick = updateFlow;
+$("#updlink").onclick = e => { e.preventDefault(); updateFlow(); };
 
 /* ---------- boot ---------- */
 setInterval(() => fetch("/api/ping").catch(() => {}), 10000);

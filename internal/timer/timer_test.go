@@ -22,9 +22,6 @@ func TestStartPauseElapsed(t *testing.T) {
 	if !b.Running() || b.Elapsed(now) != 5*time.Minute {
 		t.Errorf("B-2: running=%v elapsed=%v", b.Running(), b.Elapsed(now))
 	}
-	if got := a.StartTime(now); !got.Equal(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) {
-		t.Errorf("start time %v", got)
-	}
 }
 
 func TestSetElapsedAndReset(t *testing.T) {

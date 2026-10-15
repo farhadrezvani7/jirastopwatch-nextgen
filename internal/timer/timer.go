@@ -32,16 +32,6 @@ func (t *Timer) Elapsed(now time.Time) time.Duration {
 
 func (t *Timer) Running() bool { return t.RunningSince != nil }
 
-// StartTime is the earliest sensible start for a worklog: either when the
-// timer was first started, or "now minus elapsed" if the time was edited by hand.
-func (t *Timer) StartTime(now time.Time) time.Time {
-	est := now.Add(-t.Elapsed(now))
-	if t.FirstStart == nil || est.Before(*t.FirstStart) {
-		return est
-	}
-	return *t.FirstStart
-}
-
 type Manager struct {
 	mu     sync.Mutex
 	path   string

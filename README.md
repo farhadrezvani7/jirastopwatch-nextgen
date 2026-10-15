@@ -51,6 +51,9 @@ Download the file for your system from the [**Releases**](https://github.com/far
 
 > No Chromium-based browser? The app opens in your default browser instead and quits when you close the tab.
 
+### Updating
+Open the menu under your name → **Check for updates**. If a newer release exists, confirm and the app downloads it, verifies its checksum, replaces itself and restarts, with no uninstalling and no manual download. Running timers keep counting. Copies installed system-wide (e.g. from a `.deb`/`.rpm` in `/usr/bin`) can't replace themselves; for those the dialog links to the download page instead.
+
 ### Build from source (any OS)
 ```bash
 git clone https://github.com/farhadrezvani7/jirastopwatch-nextgen.git

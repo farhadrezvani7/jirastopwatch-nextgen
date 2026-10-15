@@ -42,6 +42,10 @@ type server struct {
 	lockPaused []string // timers paused by a session lock, for "resume on unlock"
 	update     updateInfo
 
+	updating   bool   // an update is being downloaded
+	restartExe string // set once an update is installed: main starts this after shutting down
+	quit       func() // asks main to shut down (set by main)
+
 	pingMu   sync.Mutex
 	lastPing time.Time
 }
@@ -79,6 +83,9 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /api/timers/{key}/reset", s.resetTimer)
 	mux.HandleFunc("POST /api/timers/{key}/comment", s.setComment)
 	mux.HandleFunc("GET /api/update", s.updateStatus)
+	mux.HandleFunc("GET /api/started", s.startedFor)
+	mux.HandleFunc("POST /api/update/check", s.updateCheck)
+	mux.HandleFunc("POST /api/update/apply", s.updateApply)
 	mux.HandleFunc("POST /api/timers/{key}/move", s.moveTimer)
 	mux.HandleFunc("GET /api/issues/{key}/estimate", s.estimate)
 
@@ -191,6 +198,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 		"site":        s.cfg.Site,
 		"email":       s.cfg.Email,
 		"hasSaved":    s.cfg.Token != "",
+		"version":     version,
 		"pauseOthers": s.cfg.PauseOthers,
 		"prefs":       s.prefs(),
 	})
@@ -392,11 +400,34 @@ func (s *server) state(w http.ResponseWriter, r *http.Request) {
 	out := make([]timerDTO, len(ts))
 	for i, t := range ts {
 		out[i] = timerDTO{t.Key, t.Summary, t.Project, t.Status,
-			int64(t.Elapsed(now).Seconds()), t.Running(), t.Comment, t.StartTime(now).In(loc).Format(localLayout)}
+			int64(t.Elapsed(now).Seconds()), t.Running(), t.Comment, defaultStart(now, t.Elapsed(now)).In(loc).Format(localLayout)}
 	}
 	_, off := now.In(loc).Zone()
 	writeJSON(w, 200, map[string]any{"timers": out, "pauseOthers": po,
 		"zone": map[string]any{"name": loc.String(), "offsetSec": off, "nowUnix": now.Unix()}})
+}
+
+// defaultStart is when a worklog of the given length would have started if it ended now
+// (the log dialog rounds the length up to whole minutes, so this does too).
+func defaultStart(now time.Time, d time.Duration) time.Time {
+	mins := (d + time.Minute - 1) / time.Minute
+	if mins < 1 {
+		mins = 1
+	}
+	return now.Add(-mins * time.Minute)
+}
+
+// startedFor answers "if I log this much time right now, when did it start?" in the chosen zone.
+func (s *server) startedFor(w http.ResponseWriter, r *http.Request) {
+	d, ok := jira.ParseDuration(r.URL.Query().Get("time"), s.hours())
+	if !ok || d <= 0 {
+		fail(w, 400, "err.timeFormat")
+		return
+	}
+	s.mu.RLock()
+	loc := s.cfg.Location()
+	s.mu.RUnlock()
+	writeJSON(w, 200, map[string]string{"started": defaultStart(time.Now(), d).In(loc).Format(localLayout)})
 }
 
 func (s *server) addTimer(w http.ResponseWriter, r *http.Request) {
@@ -802,8 +833,11 @@ func (s *server) onLock(locked bool) {
 // onExit applies the "when the app closes" setting.
 func (s *server) onExit() {
 	s.mu.RLock()
-	mode := s.cfg.ExitMode
+	mode, restarting := s.cfg.ExitMode, s.restartExe != ""
 	s.mu.RUnlock()
+	if restarting { // an update restart is not "closing the app": timers keep running
+		return
+	}
 	switch mode {
 	case "pause":
 		s.timers.PauseAll()

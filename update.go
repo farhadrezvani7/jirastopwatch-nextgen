@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -63,34 +67,52 @@ func newerVersion(latest, current string) bool {
 	return false
 }
 
-// checkUpdate asks GitHub for the latest release once, in the background.
-func (s *server) checkUpdate() {
+// Release locations; tests point these at a local fake.
+var (
+	apiBase      = "https://api.github.com"
+	downloadBase = "https://github.com"
+)
+
+type releaseInfo struct {
+	Tag string `json:"tag_name"`
+	URL string `json:"html_url"`
+}
+
+// latestRelease asks GitHub for the newest published release.
+func latestRelease(ctx context.Context) (releaseInfo, error) {
+	var rel releaseInfo
 	if updateRepo == "" {
-		return
+		return rel, errors.New("updates are not enabled in this build")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/"+updateRepo+"/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiBase+"/repos/"+updateRepo+"/releases/latest", nil)
 	if err != nil {
-		return
+		return rel, err
 	}
 	req.Header.Set("User-Agent", "jirastopwatch-nextgen")
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return
+		return rel, err
 	}
 	defer resp.Body.Close()
-	var rel struct {
-		Tag string `json:"tag_name"`
-		URL string `json:"html_url"`
+	if resp.StatusCode != 200 {
+		return rel, fmt.Errorf("GitHub answered %s", resp.Status)
 	}
-	if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&rel) != nil {
-		return
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil || rel.Tag == "" {
+		return rel, errors.New("unexpected answer from GitHub")
 	}
-	s.mu.Lock()
-	s.update = updateInfo{rel.Tag, rel.URL, newerVersion(rel.Tag, version)}
-	s.mu.Unlock()
+	return rel, nil
+}
+
+// checkUpdate asks GitHub for the latest release once, in the background.
+func (s *server) checkUpdate() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if rel, err := latestRelease(ctx); err == nil {
+		s.mu.Lock()
+		s.update = updateInfo{rel.Tag, rel.URL, newerVersion(rel.Tag, version)}
+		s.mu.Unlock()
+	}
 }
 
 func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
@@ -102,3 +124,80 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, u)
 }
+
+// updateCheck is the "Check for updates" button: it asks GitHub right now (even if the automatic check is off).
+func (s *server) updateCheck(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	rel, err := latestRelease(ctx)
+	if err != nil {
+		fail(w, 502, "err.updCheck|"+err.Error())
+		return
+	}
+	u := updateInfo{rel.Tag, rel.URL, newerVersion(rel.Tag, version)}
+	s.mu.Lock()
+	s.update = u
+	s.mu.Unlock()
+	exe, err := exePath()
+	writeJSON(w, 200, map[string]any{
+		"latest": u.Latest, "url": u.URL, "newer": u.Newer, "current": version,
+		"canInstall": err == nil && writable(filepath.Dir(exe)),
+	})
+}
+
+// updateApply downloads the newest release, swaps it in for the running binary and restarts the app.
+func (s *server) updateApply(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.updating {
+		s.mu.Unlock()
+		fail(w, 409, "err.updInstall|already in progress")
+		return
+	}
+	s.updating = true
+	s.mu.Unlock()
+	defer func() { s.mu.Lock(); s.updating = false; s.mu.Unlock() }()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	// Ask GitHub again instead of trusting the page: what gets installed is decided here.
+	rel, err := latestRelease(ctx)
+	if err != nil {
+		fail(w, 502, "err.updCheck|"+err.Error())
+		return
+	}
+	if !newerVersion(rel.Tag, version) {
+		fail(w, 409, "err.updInstall|no newer version")
+		return
+	}
+	exe, err := exePath()
+	if err != nil {
+		fail(w, 500, "err.updInstall|"+err.Error())
+		return
+	}
+	newPath, err := downloadUpdate(ctx, rel.Tag, exe)
+	if err != nil {
+		if errors.Is(err, errNotWritable) {
+			fail(w, 409, "err.updNoWrite")
+		} else {
+			fail(w, 502, "err.updInstall|"+err.Error())
+		}
+		return
+	}
+	if err := swapBinary(newPath, exe); err != nil {
+		_ = os.Remove(newPath)
+		fail(w, 500, "err.updInstall|"+err.Error())
+		return
+	}
+	s.mu.Lock()
+	s.restartExe = exe
+	quit := s.quit
+	s.mu.Unlock()
+	writeJSON(w, 200, map[string]any{"ok": true, "version": rel.Tag})
+	if quit != nil {
+		go func() { time.Sleep(600 * time.Millisecond); quit() }() // let the answer reach the page first
+	}
+}
+
+func (s *server) setQuit(f func()) { s.mu.Lock(); s.quit = f; s.mu.Unlock() }
+
+func (s *server) restartTarget() string { s.mu.RLock(); defer s.mu.RUnlock(); return s.restartExe }

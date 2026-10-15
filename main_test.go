@@ -111,14 +111,36 @@ func TestCountryLanguageMapPointsToRealPacksAndZones(t *testing.T) {
 	have := map[string]bool{}
 	for _, z := range zones {
 		have[z.C] = true
-		for _, name := range z.Z {
-			if _, err := time.LoadLocation(name); err != nil {
-				t.Errorf("zone %s (%s) does not load: %v", name, z.C, err)
-			}
-		}
 	}
 	if len(zones) < 240 {
 		t.Errorf("only %d countries", len(zones))
+	}
+	// The app serves only zones this runtime can load. A recent tz database may
+	// name zones an older Go or OS copy lacks; a few is expected, many is a bug.
+	var served []struct {
+		C string   `json:"c"`
+		Z []string `json:"z"`
+	}
+	if err := json.Unmarshal(loadableZones(zb), &served); err != nil {
+		t.Fatal(err)
+	}
+	total, kept := 0, 0
+	for _, z := range zones {
+		total += len(z.Z)
+	}
+	for _, z := range served {
+		kept += len(z.Z)
+		for _, name := range z.Z {
+			if _, err := time.LoadLocation(name); err != nil {
+				t.Errorf("served zone %s does not load", name)
+			}
+		}
+	}
+	if total-kept > 5 {
+		t.Errorf("%d of %d zones can't be loaded here", total-kept, total)
+	}
+	if len(served) < 240 {
+		t.Errorf("only %d countries remain loadable", len(served))
 	}
 	for c, l := range cl {
 		if !have[c] {

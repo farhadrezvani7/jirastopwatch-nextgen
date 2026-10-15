@@ -60,6 +60,7 @@ func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(sub)))
+	mux.HandleFunc("GET /zones.json", serveZones)
 
 	mux.HandleFunc("GET /api/ping", s.ping)
 	mux.HandleFunc("GET /api/session", s.session)
@@ -814,4 +815,48 @@ func (s *server) noUpdateCheck() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cfg.NoUpdateCheck
+}
+
+var (
+	zonesOnce sync.Once
+	zonesJSON []byte
+)
+
+// serveZones serves the country/zone list, minus any zone this machine's Go
+// runtime can't load. The list is generated from a recent tz database; the
+// embedded copy (used on Windows) or an older system copy may lack the newest
+// zone names, and offering one would make "Save" fail.
+func serveZones(w http.ResponseWriter, r *http.Request) {
+	zonesOnce.Do(func() {
+		raw, _ := webFS.ReadFile("web/zones.json")
+		zonesJSON = loadableZones(raw)
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(zonesJSON)
+}
+
+func loadableZones(raw []byte) []byte {
+	type country struct {
+		C string   `json:"c"`
+		N string   `json:"n"`
+		Z []string `json:"z"`
+	}
+	var in, out []country
+	if json.Unmarshal(raw, &in) != nil {
+		return raw
+	}
+	for _, c := range in {
+		var ok []string
+		for _, z := range c.Z {
+			if _, err := time.LoadLocation(z); err == nil {
+				ok = append(ok, z)
+			}
+		}
+		if len(ok) > 0 {
+			c.Z = ok
+			out = append(out, c)
+		}
+	}
+	b, _ := json.Marshal(out)
+	return b
 }

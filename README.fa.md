@@ -67,7 +67,7 @@ chmod +x jirastopwatch-nextgen-linux-amd64
 ```bash
 git clone https://github.com/farhadrezvani7/jirastopwatch-nextgen.git
 cd jirastopwatch-nextgen
-go build -o jirastopwatch-nextgen .        # نیاز به Go 1.22 به بالا
+go build -o jirastopwatch-nextgen .        # نیاز به Go 1.24 به بالا
 ./jirastopwatch-nextgen
 ```
 

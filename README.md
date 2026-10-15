@@ -58,7 +58,7 @@ Download the file for your system from the [**Releases**](https://github.com/far
 ```bash
 git clone https://github.com/farhadrezvani7/jirastopwatch-nextgen.git
 cd jirastopwatch-nextgen
-go build -o jirastopwatch-nextgen .        # needs Go 1.22+
+go build -o jirastopwatch-nextgen .        # needs Go 1.24+
 ./jirastopwatch-nextgen
 ```
 On Windows run `.\install.ps1` to also get a Start Menu shortcut; `./build-all.sh` cross-compiles every platform into `dist/`.

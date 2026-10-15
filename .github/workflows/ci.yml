@@ -17,8 +17,8 @@ jobs:
       - run: go vet ./...
       - name: Test
         shell: bash
-        run: go test ./... 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
+        run: go test -v ./... 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
       - name: Show failures
         if: failure()
         shell: bash
-        run: grep -E "FAIL|panic|_test.go|Error|error" test-output.txt | head -30 | while IFS= read -r l; do echo "::error::${l//%/%25}"; done
+        run: grep -vE "^(=== RUN|=== PAUSE|=== CONT|--- PASS|    --- PASS|PASS$|ok )" test-output.txt | head -60 | while IFS= read -r l; do echo "::error::${l//%/%25}"; done

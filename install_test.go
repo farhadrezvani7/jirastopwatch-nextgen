@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -21,8 +22,12 @@ func TestInstallDesktopRoundTrip(t *testing.T) {
 	bin := filepath.Join(home, ".local", "bin", "jirastopwatch-nextgen")
 	desktop := filepath.Join(home, ".local", "share", "applications", "jirastopwatch-nextgen.desktop")
 	icon := filepath.Join(home, ".local", "share", "icons", "hicolor", "512x512", "apps", "jirastopwatch-nextgen.png")
-	if st, err := os.Stat(bin); err != nil || st.Mode()&0o111 == 0 {
-		t.Fatalf("binary missing or not executable: %v", err)
+	st, err := os.Stat(bin)
+	if err != nil {
+		t.Fatalf("binary missing: %v", err)
+	}
+	if runtime.GOOS != "windows" && st.Mode()&0o111 == 0 { // Windows has no exec bit
+		t.Fatal("binary is not executable")
 	}
 	b, err := os.ReadFile(desktop)
 	if err != nil || !strings.Contains(string(b), "Exec="+bin+"\n") {

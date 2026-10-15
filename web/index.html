@@ -625,7 +625,26 @@ async function logDialog(x) {
   est.onchange = () => estVal.classList.toggle("hidden", est.value !== "new" && est.value !== "manual");
   const tz = el("div", {className: "hint", textContent: zoneInfo ? `${zoneInfo.name} · ${offsetLabel(zoneInfo.offsetSec)}` : ""});
   tz.dir = "ltr";
-  const body = el("div", {}, el("div", {className: "row"}, field(t("log.time"), time), el("div", {}, field(t("log.started"), started), tz)),
+  // Jira shows times in the zone of the user's Jira profile. If that differs from ours, say what this moment looks like there.
+  const jz = el("div", {className: "hint"});
+  const showJiraZone = () => {
+    jz.textContent = "";
+    if (!me || !me.timeZone || !zoneInfo || !started.value) return;
+    try {
+      const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(started.value);
+      const instant = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) - zoneInfo.offsetSec * 1000;   // `started` is wall-clock time in our zone
+      const p = new Intl.DateTimeFormat("en", {timeZone: me.timeZone, timeZoneName: "longOffset"}).formatToParts(new Date(instant)).find(x => x.type === "timeZoneName").value;
+      const o = /GMT([+-])(\d\d):(\d\d)/.exec(p), off = o ? (o[1] === "-" ? -1 : 1) * (o[2] * 3600 + o[3] * 60) : 0;
+      if (off === zoneInfo.offsetSec) return;   // same clock, nothing to explain
+      const when = new Intl.DateTimeFormat("en-CA", {timeZone: me.timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"}).format(new Date(instant)).replace(",", "");
+      jz.textContent = t("log.jiraZone", {zone: me.timeZone, time: when});
+      jz.dir = "auto";
+    } catch {}
+  };
+  started.addEventListener("input", showJiraZone);
+  time.addEventListener("input", () => setTimeout(showJiraZone, 600));
+  setTimeout(showJiraZone, 0);
+  const body = el("div", {}, el("div", {className: "row"}, field(t("log.time"), time), el("div", {}, field(t("log.started"), started), tz, jz)),
     field(t("log.comment"), comment), field(t("log.status"), trans),
     field(t("est.label"), est), estVal);
   const submit = el("button", {type: "submit", className: "btn", textContent: t("log.btn")});

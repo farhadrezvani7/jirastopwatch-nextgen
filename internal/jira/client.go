@@ -39,6 +39,7 @@ type Issue struct {
 type User struct {
 	DisplayName string `json:"displayName"`
 	Email       string `json:"emailAddress"`
+	TimeZone    string `json:"timeZone"` // the zone Jira shows this user's times in (profile setting)
 }
 
 type Filter struct {

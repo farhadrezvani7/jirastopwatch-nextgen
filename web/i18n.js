@@ -76,6 +76,7 @@ Object.assign(STR.en, {
   "upd.title": "Update available", "upd.ask": "Version {latest} is available (you have {current}). Replace the current version with the new one and restart now? Running timers keep counting.",
   "upd.now": "Update now", "upd.later": "Not now", "upd.installing": "Downloading and installing…",
   "upd.done": "Updated to {0}. The app is restarting…",
+  "log.jiraZone": "Jira shows times in your profile time zone ({zone}); this moment is {time} there.",
   "err.updCheck": "Could not check for updates: {0}", "err.updInstall": "The update failed: {0}",
   "err.updNoWrite": "This copy can't update itself (it is installed in a protected folder). Download the new version here:",
 });

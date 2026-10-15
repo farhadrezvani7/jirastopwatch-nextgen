@@ -104,13 +104,15 @@ Multiple stopwatches · pause others when one starts · edit time · remaining-e
 ## Features
 
 - ⏱ **Timers that never lose time** — they keep counting while the window is closed and are restored on the next start. Unsent notes are kept too.
-- 🌍 **Time zone by country** — all 247 countries; multi-zone countries (US, Russia, Brazil, …) get a zone picker. Worklog start time and the header clock follow it.
+- 🌍 **Time zone by country** — all 247 countries; multi-zone countries (US, Russia, Brazil, …) get a zone picker. Worklog start time and the header clock follow it. The default is your computer's own zone, and times are sent to Jira with an explicit UTC offset, so they are right wherever you are.
 - 🗣 **41 languages** — English, فارسی, العربية, اردو, کوردی, پښتو, עברית, Türkçe, Azərbaycanca, Русский, Українська, Español, Português, Français, Deutsch, Italiano, Nederlands, Polski, Čeština, Slovenčina, Română, Ελληνικά, Magyar, Български, Српски, Hrvatski, Svenska, Dansk, Suomi, Norsk, 中文, 日本語, 한국어, हिन्दी, বাংলা, தமிழ், Bahasa Indonesia, Bahasa Melayu, ไทย, Tiếng Việt, Kiswahili. Choosing a country suggests its main language.
 - 🎨 **Light & dark themes** — switch from the header, the sign-in page or Settings; *Auto* follows your OS.
 - 🔎 **Search where you need it** — language, country and zone pickers (accent-insensitive; countries match English, localized and native names), your favourite Jira filters, your timer list, and Jira issues.
 - 🪟 **Mini window** — a small always-on-top floating timer with play/pause (Chrome/Edge 116+).
 - 🔒 **Pause on lock** — pause running timers when the computer locks and optionally resume on unlock (Linux with systemd-logind, Windows, macOS).
 - 🔗 **Paste a Jira link** — `Ctrl+V` anywhere adds the issue from a `/browse/ABC-123` or board URL.
+- 🔑 **Stays signed in** — your token is kept in the system credential store and the app signs you in on launch.
+- ⬆️ **One-click updates** — *Check for updates* downloads, verifies and installs the new version for you.
 
 ### Keyboard shortcuts (same as the original)
 | Keys | Action | Keys | Action |
@@ -124,7 +126,7 @@ Multiple stopwatches · pause others when one starts · edit time · remaining-e
 ---
 
 ## Privacy & security
-- Your data goes **only to your own Jira site** — nothing else is contacted (the update check is off unless a release repo is configured at build time, and can be switched off in Settings).
+- Your data goes **only to your own Jira site** — nothing else is contacted (the update check, which asks GitHub for the latest release, is off unless a release repo is configured at build time and can be switched off in Settings; a new version is only downloaded after you confirm).
 - The local web server listens on `127.0.0.1` on a random port and requires a per-launch secret, so other websites and other users of the machine cannot talk to it.
 - If **Remember me** is ticked, the token is kept in your operating system's credential store: Windows Credential Manager, the macOS Keychain, or the Linux Secret Service (GNOME Keyring / KWallet; needs the `secret-tool` command from `libsecret-tools`). If none is available, it falls back to a file in the app's config folder that only your user can read, **not** encrypted. Old versions' plain-text tokens are moved into the credential store automatically. On shared computers leave *Remember me* off.
 - Config and timers live in `~/.config/jirastopwatch-nextgen` (Linux), `%AppData%\jirastopwatch-nextgen` (Windows) or `~/Library/Application Support/jirastopwatch-nextgen` (macOS).

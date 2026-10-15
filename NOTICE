@@ -1,0 +1,17 @@
+JiraStopWatch NextGen
+
+Copyright 2026 Farhad Rezvani (https://github.com/farhadrezvani7)
+
+This program is a rewrite, in Go with a web user interface, of Jira StopWatch
+(https://github.com/jirastopwatch/jirastopwatch), which is licensed under the
+Apache License, Version 2.0 and is
+  Copyright 2016 Carsten Gehling
+  Copyright 2020 Dan Tulloh
+  Copyright 2023 Y. Meyer-Norwood
+  (see https://jirastopwatch.com for the full list of contributors)
+
+Behaviour, features and keyboard shortcuts follow the original. This
+rewrite is distributed under the same license; see LICENSE.
+
+"Jira" and "Atlassian" are trademarks of Atlassian. This project is not
+affiliated with or endorsed by Atlassian.

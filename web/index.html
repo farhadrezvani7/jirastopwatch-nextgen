@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jira StopWatch NextGen</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='18' r='11' fill='%232f6fed'/><path d='M16 11v7l4 3' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round'/><rect x='13' y='3' width='6' height='3' rx='1' fill='%232f6fed'/></svg>">
+<style>
+:root{
+  /* light (default) */
+  --bg:#FFFFFF;--nav:#F5F5F7;--panel:#FFFFFF;--panel2:#F5F5F7;--field:#FFFFFF;--text:#1D1D1F;--muted:#6E6E73;--line:#D2D2D7;--input-line:#D2D2D7;
+  --accent:#0071E3;--accent-ink:#FFFFFF;--link:#0066CC;--ok:#16a34a;--warn:#b45309;--danger:#dc2626;--new:#B64400;
+  --shadow:0 1px 2px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.08);color-scheme:light;
+}
+/* no explicit choice: follow the OS */
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#000000;--nav:#0E0E0E;--panel:#1D1D1F;--panel2:#333336;--field:#000000;--text:#F5F5F7;--muted:#86868B;--line:#333336;--input-line:#6E6E73;
+  --accent:#0071E3;--accent-ink:#FFFFFF;--link:#2997FF;--ok:#34d399;--warn:#FFD500;--danger:#f87171;--new:#B64400;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 4px 16px rgba(0,0,0,.5);color-scheme:dark;
+}}
+:root[data-theme=dark]{
+  --bg:#000000;--nav:#0E0E0E;--panel:#1D1D1F;--panel2:#333336;--field:#000000;--text:#F5F5F7;--muted:#86868B;--line:#333336;--input-line:#6E6E73;
+  --accent:#0071E3;--accent-ink:#FFFFFF;--link:#2997FF;--ok:#34d399;--warn:#FFD500;--danger:#f87171;--new:#B64400;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 4px 16px rgba(0,0,0,.5);color-scheme:dark;
+}
+:root[data-theme=light]{color-scheme:light}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+.mono{font-variant-numeric:tabular-nums}
+
+/* login */
+#login{min-height:100%;display:flex;padding:24px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.login-card{width:100%;max-width:400px;padding:28px 32px;margin:auto}
+.logo{width:44px;height:44px;border-radius:12px;background:var(--accent);display:grid;place-items:center;margin-bottom:16px}
+.logo svg{width:26px;height:26px}
+h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 22px}
+label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:14px 0 6px}
+input[type=text],input[type=search],input[type=email],input[type=password],input[type=datetime-local],textarea,select{
+  width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--input-line);background:var(--field);outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+.check{display:flex;gap:8px;align-items:center;margin:16px 0 0;font-size:13px;color:var(--muted);font-weight:400}
+.check input{width:16px;height:16px}
+.btn{border:0;border-radius:10px;padding:10px 16px;background:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn:hover{filter:brightness(1.06)}
+.btn:disabled{opacity:.6;cursor:default}
+.btn.ghost{background:var(--panel2);color:var(--text)}
+.btn.danger{background:var(--danger);color:#fff}
+.btn.block{width:100%;margin-top:20px;padding:12px}
+.err{color:var(--danger);font-size:13px;margin-top:12px;min-height:18px}
+.hint{font-size:12px;color:var(--muted);margin-top:6px}
+a{color:var(--link)}
+
+/* app shell */
+#app{display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:auto 1fr;height:100%}
+header{grid-column:1/3;display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--nav)}
+header .brand{font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+header .brand i{width:10px;height:10px;border-radius:50%;background:var(--muted)}
+header .brand i.live{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 25%,transparent)}
+.spacer{flex:1}
+.total{color:var(--muted)}.total b{color:var(--text);font-size:15px}
+.iconbtn{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:7px 10px;color:var(--text)}
+.iconbtn:hover{border-color:var(--accent)}
+.user{position:relative}
+.menu{position:absolute;inset-inline-end:0;top:110%;min-width:230px;padding:8px;z-index:20}
+.menu .who{padding:8px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.menu .who small{display:block;color:var(--muted)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:6px 0}
+.menu button{display:block;width:100%;text-align:start;background:none;border:0;padding:8px 10px;border-radius:8px}
+.menu button:hover{background:var(--panel2)}
+.menu label.check{padding:8px 10px;margin:0}
+
+main{padding:20px;overflow:auto}
+.addrow{display:flex;gap:8px;margin-bottom:16px}
+.addrow input{flex:1}
+.empty{border:2px dashed var(--line);border-radius:16px;padding:48px 20px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--text);font-size:16px;margin-bottom:4px}
+
+.timer{display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;align-items:center;padding:14px 16px;margin-bottom:10px;border-radius:14px;
+  background:var(--panel);border:1px solid var(--line);transition:border-color .15s, box-shadow .15s}
+.timer.running{border-color:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 18%,transparent)}
+.play{width:46px;height:46px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center}
+.timer.running .play{background:var(--ok);color:#fff}
+.play svg{width:20px;height:20px;fill:currentColor}
+.info{min-width:0}
+.keyline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.key{font-weight:700;color:var(--link);text-decoration:none}
+.key:hover{text-decoration:underline}
+.pill{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--panel2);color:var(--muted);white-space:nowrap}
+.summary{text-align:start;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.proj{color:var(--muted);font-size:12px}
+.time{font-size:26px;font-weight:600;letter-spacing:-.02em;background:none;border:0;padding:4px 8px;border-radius:8px}
+.time:hover{background:var(--panel2)}
+.actions{display:flex;gap:6px}
+.actions button{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:8px 12px;font-weight:600}
+.actions button:hover{border-color:var(--accent)}
+.actions .x{padding:8px 10px;color:var(--muted)}
+.actions .x:hover{color:var(--danger);border-color:var(--danger)}
+
+aside{border-inline-start:1px solid var(--line);background:var(--nav);display:flex;flex-direction:column;min-height:0}
+.tabs{display:flex;gap:4px;padding:12px 12px 0}
+.tabs button{flex:1;border:0;background:none;padding:8px 4px;border-radius:8px;color:var(--muted);font-weight:600}
+.tabs button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
+.search{padding:12px}
+.filterbar{padding:0 12px 8px}
+.list{overflow:auto;padding:0 8px 12px;flex:1}
+.issue{display:block;width:100%;text-align:start;border:0;background:none;padding:10px;border-radius:10px}
+.issue:hover{background:var(--panel2)}
+.issue .t{display:flex;justify-content:space-between;gap:8px}
+.issue b{color:var(--link)}
+.issue .s{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.issue.added{opacity:.5}
+.note{color:var(--muted);padding:20px;text-align:center}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* modal + toast */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:20px;z-index:50}
+.modal{width:100%;max-width:440px;padding:24px}
+.modal h2{margin:0 0 2px;font-size:18px}
+.modal .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.modal{max-height:92vh;overflow:auto}
+.ltr{direction:ltr;text-align:left}
+[dir=rtl] .ltr::placeholder{text-align:left}
+.langsel{float:inline-end;margin-top:-6px;width:170px}
+.combo{position:relative}
+.combo>button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:start;padding:10px 12px;border-radius:10px;border:1px solid var(--input-line);background:var(--field)}
+.combo>button:focus-visible{outline:2px solid var(--accent)}
+.combo>button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.combo .pop{position:absolute;inset-inline:0;top:calc(100% + 4px);z-index:70;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:6px}
+.combo .pop input{margin-bottom:6px}
+.combo ul{list-style:none;margin:0;padding:0;max-height:240px;overflow:auto}
+.combo li{padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+.combo li small{color:var(--muted);white-space:nowrap}
+.combo li.on,.combo li:hover{background:var(--panel2)}
+.combo li.sel{font-weight:700}
+.combo li.none{color:var(--muted);cursor:default}
+.tsearch{margin-bottom:12px}
+.updbar{display:flex;gap:10px;align-items:center;padding:10px 14px;margin-bottom:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--accent)}
+.updbar .iconbtn{margin-inline-start:auto;padding:2px 8px}
+.timer.sel{outline:2px solid var(--accent);outline-offset:-2px}
+.mv{display:flex;flex-direction:column;gap:2px}
+.mv button{border:1px solid var(--line);background:var(--panel2);border-radius:6px;font-size:9px;line-height:1;padding:3px 6px;color:var(--muted)}
+.mv button:hover{border-color:var(--accent);color:var(--text)}
+.timer{grid-template-columns:auto auto 1fr auto auto}
+.themebtn{min-width:38px;text-align:center;line-height:1}
+.themewrap{position:absolute;inset-block-start:16px;inset-inline-end:16px}
+#login{position:relative}
+.modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--text);color:var(--bg);padding:10px 16px;border-radius:12px;box-shadow:var(--shadow);max-width:80vw}
+.toast.bad{background:var(--danger);color:#fff}
+
+@media (max-width:820px){
+  #app{grid-template-columns:1fr}
+  header{grid-column:1}
+  aside{display:none}
+}
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <form class="card login-card" id="loginForm" autocomplete="on">
+    <div class="themewrap"><button type="button" class="iconbtn themebtn" data-themebtn></button></div>
+    <div id="loginLang" class="langsel"></div>
+    <div class="logo"><svg viewBox="0 0 32 32"><circle cx="16" cy="18" r="11" fill="none" stroke="#fff" stroke-width="2.5"/><path d="M16 11v7l4 3" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="13" y="3" width="6" height="3" rx="1" fill="#fff"/></svg></div>
+    <h1>Jira StopWatch NextGen</h1>
+    <p class="sub" data-i18n="login.sub"></p>
+
+    <label for="site" data-i18n="login.site"></label>
+    <input id="site" class="ltr" type="text" placeholder="yourcompany.atlassian.net / jira.company.com" required autocomplete="url" spellcheck="false">
+
+    <label for="mode" data-i18n="login.mode"></label>
+    <select id="mode">
+      <option value="cloud" data-i18n="mode.cloud"></option>
+      <option value="pat" data-i18n="mode.pat"></option>
+      <option value="basic" data-i18n="mode.basic"></option>
+    </select>
+
+    <div id="idWrap">
+      <label for="email" id="idLabel"></label>
+      <input id="email" class="ltr" type="text" placeholder="you@company.com" autocomplete="username" spellcheck="false">
+    </div>
+
+    <label for="token" id="secretLabel"></label>
+    <input id="token" class="ltr" type="password" autocomplete="current-password">
+    <div class="hint" id="modeHint"></div>
+
+    <label class="check"><input id="remember" type="checkbox"> <span data-i18n="login.remember"></span></label>
+    <div class="hint" id="rememberHint" style="margin-top:4px" data-i18n="login.rememberHint"></div>
+
+    <button class="btn block" id="loginBtn" type="submit" data-i18n="login.signin"></button>
+    <div class="err" id="loginErr" role="alert"></div>
+  </form>
+</section>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><i id="live"></i> Jira StopWatch NextGen</div>
+    <div class="spacer"></div>
+    <div class="clock mono" id="clock" dir="ltr" style="color:var(--muted)"></div>
+    <div class="total"><span data-i18n="hdr.total"></span> <b class="mono" id="total">0m</b></div>
+    <button class="iconbtn hidden" id="miniBtn" type="button" data-tip="mini.tip">⧉</button>
+    <button class="iconbtn themebtn" data-themebtn type="button"></button>
+    <button class="iconbtn" id="pauseAll" data-i18n="hdr.pauseAll"></button>
+    <div class="user">
+      <button class="iconbtn" id="userBtn"></button>
+      <div class="menu card hidden" id="menu">
+        <div class="who"><b id="mName"></b><small id="mSite"></small></div>
+        <label class="check"><input type="checkbox" id="optPause"> <span data-i18n="set.pauseOthers"></span></label>
+        <button id="openSettings" data-i18n="menu.settings"></button>
+        <hr>
+        <button id="signOut" data-i18n="menu.signOut"></button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="updbar" class="updbar hidden"><span id="updtext"></span> <a id="updlink" target="_blank" rel="noopener"></a> <button type="button" class="iconbtn" id="updx" aria-label="×">✕</button></div>
+    <form class="addrow" id="addForm">
+      <input id="addKey" class="ltr" type="text" data-ph="add.placeholder" spellcheck="false" autocomplete="off">
+      <button class="btn" type="submit" data-i18n="add.btn"></button>
+    </form>
+    <input id="timerSearch" class="tsearch hidden" type="search" data-ph="timers.filter" autocomplete="off">
+    <div id="timers"></div>
+  </main>
+
+  <aside>
+    <div class="tabs" id="tabs">
+      <button data-src="recent" class="on" data-i18n="tab.recent"></button>
+      <button data-src="assigned" data-i18n="tab.assigned"></button>
+      <button data-src="filter" data-i18n="tab.filters"></button>
+    </div>
+    <div class="search" style="display:flex;gap:8px"><input id="q" type="text" data-ph="search.ph" autocomplete="off"><button class="iconbtn" id="reload" type="button" data-tip="reload.tip">⟳</button></div>
+    <div class="filterbar hidden" id="filterbar"></div>
+    <div class="list" id="list"></div>
+  </aside>
+</div>
+
+<div id="toast"></div>
+
+<script src="i18n.js"></script>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const el = (tag, props = {}, ...kids) => {
+  const e = Object.assign(document.createElement(tag), props);
+  for (const k of kids) e.append(k);
+  return e;
+};
+
+async function api(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method, headers: body ? {"Content-Type": "application/json"} : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch { throw new Error(t("err.appGone")); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 && path !== "/api/login") showLogin();
+    throw new Error(tr(data.error || `Error ${res.status}`));
+  }
+  return data;
+}
+
+function toast(msg, bad) {
+  const x = el("div", {className: "toast" + (bad ? " bad" : ""), textContent: msg});
+  $("#toast").append(x);
+  setTimeout(() => x.remove(), bad ? 6000 : 3000);
+}
+
+function fmt(sec, withSec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  const p = n => String(n).padStart(2, "0");
+  return withSec ? `${h}:${p(m)}:${p(s)}` : (h ? `${h}h ${m}m` : `${m}m`);
+}
+
+/* ---------- i18n ---------- */
+let prefs = {theme: "", lang: "", country: "", timezone: "", commentMode: "", startTransitions: ""};
+let zoneInfo = null;     // {name, offsetSec, nowUnix} from /api/state
+
+/* searchable dropdown: items are {value, label, hint?, search?}; typing filters (accent-insensitive) */
+function combo(items, value, onChange, opts = {}) {
+  const root = el("div", {className: "combo"});
+  const btn = el("button", {type: "button", ariaHasPopup: "listbox"});
+  const label = el("span"), caret = el("span", {textContent: "▾"});
+  btn.append(label, caret);
+  let cur = value, pop = null;
+  const find = v => items.find(i => i.value === v);
+  const paint = () => { label.textContent = (find(cur) || items[0] || {}).label || ""; };
+  function close() { pop?.remove(); pop = null; document.removeEventListener("mousedown", away, true); }
+  function away(e) { if (!root.contains(e.target)) close(); }
+  function pick(v) { cur = v; paint(); close(); onChange && onChange(v); }
+  function open() {
+    if (pop) return close();
+    const input = el("input", {type: "text", placeholder: t("filter.ph"), autocomplete: "off", spellcheck: false});
+    const ul = el("ul", {role: "listbox"});
+    pop = el("div", {className: "pop"}, input, ul);
+    root.append(pop);
+    document.addEventListener("mousedown", away, true);
+    let shown = [], idx = 0;
+    const draw = () => {
+      const q = norm(input.value.trim());
+      shown = items.filter(i => !q || norm(i.label + " " + (i.search || "") + " " + (i.value || "")).includes(q));
+      idx = Math.max(0, shown.findIndex(i => i.value === cur));
+      if (q) idx = 0;
+      ul.replaceChildren(...(shown.length ? shown.map((i, n) => {
+        const li = el("li", {className: (n === idx ? "on " : "") + (i.value === cur ? "sel" : ""), role: "option"}, el("span", {textContent: i.label, dir: "auto"}));
+        if (i.hint) li.append(el("small", {textContent: i.hint, dir: "ltr"}));
+        li.onmousedown = e => { e.preventDefault(); pick(i.value); };
+        return li;
+      }) : [el("li", {className: "none", textContent: t("filter.none")})]));
+      ul.querySelector(".on")?.scrollIntoView({block: "nearest"});
+    };
+    input.oninput = draw;
+    input.onkeydown = e => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); idx = Math.min(shown.length - 1, Math.max(0, idx + (e.key === "ArrowDown" ? 1 : -1)));
+        [...ul.children].forEach((li, n) => li.classList.toggle("on", n === idx)); ul.children[idx]?.scrollIntoView({block: "nearest"});
+      } else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (shown[idx]) pick(shown[idx].value); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); btn.focus(); }
+    };
+    draw(); input.focus();
+  }
+  btn.onclick = open;
+  paint(); root.append(btn);
+  return {el: root, get: () => cur, set: v => { cur = v; paint(); }};
+}
+
+const langItems = () => Object.entries(LANGS).map(([code, [native, english]]) => ({value: code, label: native, hint: native === english ? "" : english, search: english + " " + code}));
+let loginLangCombo = null;
+
+/* ---------- theme: "" (follow the OS) | light | dark ---------- */
+const THEME_ICON = {"": "◐", light: "☀", dark: "☾"};
+const THEME_NEXT = {"": "light", light: "dark", dark: ""};
+const themeName = v => t(v === "light" ? "theme.light" : v === "dark" ? "theme.dark" : "theme.system");
+function applyTheme() {
+  const th = prefs.theme === "light" || prefs.theme === "dark" ? prefs.theme : "";
+  if (th) document.documentElement.dataset.theme = th; else delete document.documentElement.dataset.theme;
+  for (const b of document.querySelectorAll("[data-themebtn]")) {
+    b.textContent = THEME_ICON[th];
+    b.title = b.ariaLabel = `${t("theme.label")}: ${themeName(th)}`;
+  }
+}
+async function setTheme(v) {
+  prefs.theme = v; applyTheme();
+  try { await api("POST", "/api/settings", {theme: v}); } catch {}
+}
+for (const b of document.querySelectorAll("[data-themebtn]")) b.onclick = () => setTheme(THEME_NEXT[prefs.theme || ""]);
+
+async function applyI18n() {
+  await setLang(pickLang(prefs.lang));
+  applyTheme();
+  for (const e of document.querySelectorAll("[data-i18n]")) e.textContent = t(e.dataset.i18n);
+  for (const e of document.querySelectorAll("[data-ph]")) e.placeholder = t(e.dataset.ph);
+  for (const e of document.querySelectorAll("[data-tip]")) e.title = t(e.dataset.tip);
+  loginLangCombo = combo(langItems(), lang, async v => {
+    prefs.lang = v;
+    await applyI18n();
+    try { await api("POST", "/api/settings", {lang: v}); } catch {}
+  });
+  $("#loginLang").replaceChildren(loginLangCombo.el);
+  applyMode();
+  renderTimers(); renderList(); updateClock();
+}
+// The country's name in its own main language, so "ایران" or "日本" find it whatever the UI language is.
+function nativeName(c) {
+  const l = countryLang[c];
+  if (!l || l === lang) return "";
+  try { return new Intl.DisplayNames([l], {type: "region"}).of(c) || ""; } catch { return ""; }
+}
+function countryName(c) {
+  const z = zones.find(x => x.c === c);
+  try { return new Intl.DisplayNames([lang], {type: "region"}).of(c) || z?.n || c; } catch { return z?.n || c; }
+}
+function offsetLabel(sec) {
+  const sign = sec < 0 ? "-" : "+", a = Math.abs(sec);
+  const h = Math.floor(a / 3600), m = Math.floor(a % 3600 / 60);
+  return `UTC${sign}${h}${m ? ":" + String(m).padStart(2, "0") : ""}`;
+}
+function zoneLabel(z) { return z.split("/").pop().replaceAll("_", " "); }
+function clockIn(zone) {
+  try { return new Date().toLocaleTimeString("en-GB", {timeZone: zone || undefined, hour: "2-digit", minute: "2-digit"}); } catch { return ""; }
+}
+function updateClock() {
+  const c = $("#clock");
+  if (!zoneInfo) { c.textContent = ""; return; }
+  c.textContent = `🕒 ${clockIn(zoneInfo.name)} · ${prefs.timezone ? zoneLabel(zoneInfo.name) + " · " : ""}${offsetLabel(zoneInfo.offsetSec)}`;
+  c.title = zoneInfo.name;
+}
+
+/* ---------- state ---------- */
+let timers = [], fetchedAt = 0, site = "", me = null, pauseOthers = true;
+const elapsed = x => x.elapsedSec + (x.running ? (Date.now() - fetchedAt) / 1000 : 0);
+
+async function refresh() {
+  const s = await api("GET", "/api/state");
+  timers = s.timers; pauseOthers = s.pauseOthers; zoneInfo = s.zone; fetchedAt = Date.now();
+  renderTimers(); renderList(); updateClock();
+}
+
+/* ---------- login ---------- */
+const MODES = {
+  cloud: {id: "id.email", secret: "secret.token", hint: "hint.cloud"},
+  pat: {id: null, secret: "secret.pat", hint: "hint.pat"},
+  basic: {id: "id.user", secret: "secret.pw", hint: "hint.basic"},
+};
+let hasSaved = false;
+function applyMode() {
+  const m = MODES[$("#mode").value];
+  $("#idWrap").classList.toggle("hidden", !m.id);
+  $("#email").required = !!m.id;
+  if (m.id) $("#idLabel").textContent = t(m.id);
+  $("#secretLabel").textContent = t(m.secret);
+  $("#token").placeholder = hasSaved ? t("ph.saved") : t("ph.secret");
+  $("#token").required = !hasSaved;
+  const hint = $("#modeHint");
+  if (m.hint === "hint.cloud") {
+    const [pre, post] = t("hint.cloud", {link: "\u0000"}).split("\u0000");
+    hint.replaceChildren(pre, el("a", {href: "https://id.atlassian.com/manage-profile/security/api-tokens", target: "_blank", rel: "noopener", textContent: "id.atlassian.com → Security → API tokens", dir: "ltr"}), post);
+  } else hint.textContent = t(m.hint);
+}
+$("#mode").onchange = () => { hasSaved = false; applyMode(); };
+$("#site").addEventListener("input", () => {
+  const cloud = /^(https?:\/\/)?[^/]*\.atlassian\.net/i.test($("#site").value.trim());
+  if (cloud) $("#mode").value = "cloud";
+  else if ($("#mode").value === "cloud") $("#mode").value = "pat";
+  applyMode();
+});
+
+function showLogin(info) {
+  $("#app").classList.add("hidden");
+  $("#login").classList.remove("hidden");
+  if (info) {
+    if (info.site) $("#site").value = info.site.replace(/^https?:\/\//, "");
+    if (info.email) $("#email").value = info.email;
+    if (info.mode) $("#mode").value = info.mode;
+    hasSaved = !!info.hasSaved;
+  }
+  applyMode();
+  ($("#site").value ? ($("#email").value ? $("#token") : $("#email")) : $("#site")).focus();
+}
+
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = $("#loginBtn"), err = $("#loginErr");
+  err.textContent = ""; btn.disabled = true; btn.textContent = t("login.signing");
+  try {
+    const r = await api("POST", "/api/login", {
+      site: $("#site").value, mode: $("#mode").value, email: $("#email").value,
+      token: $("#token").value, remember: $("#remember").checked,
+    });
+    $("#token").value = "";
+    await enterApp(r.user, await api("GET", "/api/session"));
+  } catch (ex) { err.textContent = ex.message; }
+  btn.disabled = false; btn.textContent = t("login.signin");
+});
+
+async function enterApp(user, sess) {
+  me = user; site = sess.site; pauseOthers = sess.pauseOthers; prefs = sess.prefs;
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  $("#userBtn").textContent = user.displayName + " ▾";
+  $("#mName").textContent = user.displayName;
+  $("#mSite").textContent = site.replace(/^https?:\/\//, "");
+  $("#optPause").checked = pauseOthers;
+  await applyI18n();
+  await refresh();
+  loadList();
+  setTimeout(checkUpdateBanner, 4000);
+}
+
+/* ---------- header menu ---------- */
+$("#userBtn").onclick = e => { e.stopPropagation(); $("#menu").classList.toggle("hidden"); };
+document.addEventListener("click", e => { if (!e.target.closest("#menu")) $("#menu").classList.add("hidden"); });
+$("#signOut").onclick = async () => {
+  await api("POST", "/api/logout");
+  showLogin(await api("GET", "/api/session"));
+};
+$("#optPause").onchange = e => api("POST", "/api/settings", {pauseOthers: e.target.checked}).then(() => pauseOthers = e.target.checked);
+$("#pauseAll").onclick = async () => { await api("POST", "/api/timers/pause-all"); refresh(); };
+$("#openSettings").onclick = () => { $("#menu").classList.add("hidden"); settingsDialog(); };
+
+/* ---------- timers ---------- */
+const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
+
+let selKey = "";   // timer the keyboard shortcuts act on
+const selected = () => timers.find(x => x.key === selKey) || timers[0];
+function select(k) { selKey = k; for (const c of document.querySelectorAll("#timers .timer")) c.classList.toggle("sel", c.dataset.key === k); }
+async function move(key, dir) { selKey = key; await act(`/api/timers/${key}/move`, "POST", {dir}); }
+let timerQuery = "";
+$("#timerSearch").oninput = e => { timerQuery = e.target.value; renderTimers(); };
+const matchesTimer = x => !timerQuery.trim() || norm([x.key, x.summary, x.project, x.status].join(" ")).includes(norm(timerQuery.trim()));
+
+function renderTimers() {
+  const box = $("#timers");
+  box.replaceChildren();
+  $("#timerSearch").classList.toggle("hidden", timers.length < 5);
+  if (timers.length < 5) timerQuery = "";
+  if (!timers.length) {
+    box.append(el("div", {className: "empty"}, el("b", {textContent: t("empty.title")}), t("empty.text")));
+  }
+  const visible = timers.filter(matchesTimer);
+  if (timers.length && !visible.length) box.append(el("div", {className: "note", textContent: t("filter.none")}));
+  for (const x of visible) {
+    const play = el("button", {className: "play", title: t(x.running ? "timer.pause" : "timer.start")});
+    play.innerHTML = x.running ? PAUSE : PLAY;
+    play.onclick = () => { selKey = x.key; act(`/api/timers/${x.key}/${x.running ? "pause" : "start"}`); };
+
+    const link = el("a", {className: "key", textContent: x.key, href: `${site}/browse/${x.key}`, target: "_blank", rel: "noopener", dir: "ltr"});
+    const info = el("div", {className: "info"},
+      el("div", {className: "keyline"}, link, el("span", {className: "pill", textContent: x.status, dir: "auto"}), el("span", {className: "proj", textContent: x.project, dir: "auto"})),
+      el("div", {className: "summary", dir: "auto", textContent: x.summary, title: x.summary}));
+
+    const time = el("button", {className: "time mono", title: t("timer.editTip"), dir: "ltr"});
+    time.dataset.key = x.key;
+    time.onclick = () => editTime(x);
+
+    const mv = el("div", {className: "mv"},
+      el("button", {type: "button", textContent: "▲", title: t("timer.moveUp") + " (Ctrl+↑)", onclick: e => { e.stopPropagation(); move(x.key, -1); }}),
+      el("button", {type: "button", textContent: "▼", title: t("timer.moveDown") + " (Ctrl+↓)", onclick: e => { e.stopPropagation(); move(x.key, 1); }}));
+    const reset = el("button", {className: "x", textContent: "↺", title: t("timer.reset") + " (Ctrl+R)"});
+    reset.onclick = () => act(`/api/timers/${x.key}/reset`);
+    const log = el("button", {textContent: t("timer.log"), title: t("timer.logTip") + " (Ctrl+L)"});
+    log.onclick = () => logDialog(x);
+    const rm = el("button", {className: "x", textContent: "✕", title: t("timer.removeTip") + " (Ctrl+Del)"});
+    rm.onclick = () => { if (!x.running || confirm(t("timer.confirmRemove"))) act(`/api/timers/${x.key}`, "DELETE"); };
+
+    const card = el("div", {className: "timer" + (x.running ? " running" : "") + (x.key === selKey ? " sel" : "")}, mv, play, info, time, el("div", {className: "actions"}, log, reset, rm));
+    card.onmousedown = () => select(x.key);
+    card.dataset.key = x.key;
+    box.append(card);
+  }
+  tick();
+}
+
+function tick() {
+  let total = 0, any = false;
+  for (const x of timers) {
+    const s = elapsed(x); total += s; any ||= x.running;
+    const b = document.querySelector(`.time[data-key="${x.key}"]`);
+    if (b) b.textContent = fmt(s, true);
+  }
+  $("#total").textContent = fmt(total);
+  renderMini();
+  $("#live").classList.toggle("live", any);
+  document.title = any ? "● " + fmt(total) + " — Jira StopWatch NextGen" : "Jira StopWatch NextGen";
+}
+setInterval(() => { if (!$("#app").classList.contains("hidden")) { tick(); updateClock(); } }, 1000);
+
+async function act(path, method = "POST", body) {
+  try { await api(method, path, body); await refresh(); }
+  catch (e) { toast(e.message, true); }
+}
+
+/* ---------- dialogs ---------- */
+function modal(title, subtitle, body, buttons) {
+  const scrim = el("div", {className: "scrim"});
+  const close = () => { scrim.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = e => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  scrim.onmousedown = e => { if (e.target === scrim) close(); };
+  const foot = el("div", {className: "foot"});
+  const m = el("form", {className: "card modal"}, el("h2", {textContent: title}),
+    el("div", {className: "proj", textContent: subtitle, dir: "auto"}), body, foot);
+  for (const b of buttons(close)) foot.append(b);
+  scrim.append(m); document.body.append(scrim);
+  return {close, form: m};
+}
+
+function field(label, input) { return el("div", {}, el("label", {textContent: label}), input); }
+const cancelBtn = close => el("button", {type: "button", className: "btn ghost", textContent: t("btn.cancel"), onclick: close});
+
+function editTime(x) {
+  const input = el("input", {type: "text", value: fmt(elapsed(x)), spellcheck: false, className: "ltr"});
+  const {close, form} = modal(t("edit.title"), x.key + " — " + x.summary,
+    field(t("edit.field"), input),
+    close => [cancelBtn(close), el("button", {type: "submit", className: "btn", textContent: t("btn.save")})]);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    try { await api("POST", `/api/timers/${x.key}/set`, {time: input.value}); close(); refresh(); }
+    catch (ex) { toast(ex.message, true); }
+  };
+  input.focus(); input.select();
+}
+
+async function logDialog(x) {
+  const mins = Math.max(1, Math.ceil(elapsed(x) / 60));
+  const time = el("input", {type: "text", className: "ltr", value: `${Math.floor(mins / 60) ? Math.floor(mins / 60) + "h " : ""}${mins % 60}m`, spellcheck: false});
+  const started = el("input", {type: "datetime-local", value: x.startedAt});
+  const comment = el("textarea", {rows: 3, placeholder: t("log.commentPh"), dir: "auto", value: x.comment || ""});
+  let saveT; comment.oninput = () => { clearTimeout(saveT); saveT = setTimeout(() => api("POST", `/api/timers/${x.key}/comment`, {comment: comment.value}).catch(() => {}), 600); };
+  const flushDraft = () => { clearTimeout(saveT); return api("POST", `/api/timers/${x.key}/comment`, {comment: comment.value}).catch(() => {}); };
+  const trans = el("select", {}, el("option", {value: "", textContent: t("log.keep", {status: x.status})}));
+  const est = el("select", {}, ...["auto", "leave", "new", "manual"].map(k => el("option", {value: k, textContent: t("est." + k)})));
+  const estVal = el("input", {type: "text", className: "ltr hidden", placeholder: t("est.value"), spellcheck: false});
+  est.onchange = () => estVal.classList.toggle("hidden", est.value !== "new" && est.value !== "manual");
+  const tz = el("div", {className: "hint", textContent: zoneInfo ? `${zoneInfo.name} · ${offsetLabel(zoneInfo.offsetSec)}` : ""});
+  tz.dir = "ltr";
+  const body = el("div", {}, el("div", {className: "row"}, field(t("log.time"), time), el("div", {}, field(t("log.started"), started), tz)),
+    field(t("log.comment"), comment), field(t("log.status"), trans),
+    field(t("est.label"), est), estVal);
+  const submit = el("button", {type: "submit", className: "btn", textContent: t("log.btn")});
+  const {close, form} = modal(t("log.title"), x.key + " — " + x.summary, body, close => [el("button", {type: "button", className: "btn ghost", textContent: t("btn.cancel"), onclick: () => { flushDraft(); close(); }}), submit]);
+  form.onsubmit = async e => {
+    e.preventDefault(); clearTimeout(saveT); submit.disabled = true; submit.textContent = t("log.posting");
+    try {
+      const r = await api("POST", `/api/timers/${x.key}/log`, {
+        time: time.value, started: started.value, comment: comment.value, transition: trans.value,
+        estimate: est.value, estimateValue: estVal.value});
+      close(); toast(r.warning ? tr(r.warning) : t("log.done", {time: time.value, key: x.key}), !!r.warning); refresh();
+    } catch (ex) { toast(ex.message, true); submit.disabled = false; submit.textContent = t("log.btn"); }
+  };
+  comment.focus();
+  api("GET", `/api/issues/${x.key}/estimate`).then(r => {
+    if (!r.text) return;
+    est.options[1].textContent = `${t("est.leave")} (${r.text})`;
+    const mins = Math.max(1, Math.ceil(elapsed(x) / 60)) * 60;   // what "auto" will leave once this worklog is booked
+    est.options[0].textContent = `${t("est.auto")} (${fmt(Math.max(0, r.seconds - mins))})`;
+  }).catch(() => {});
+  try {
+    for (const tt of await api("GET", `/api/issues/${x.key}/transitions`))
+      trans.append(el("option", {value: tt.id, textContent: "→ " + tt.name}));
+  } catch {}
+}
+
+let zones = [], countryLang = {};   // zones: [{c: "IR", n: "Iran", z: ["Asia/Tehran"]}, ...]
+async function ensureZones() {
+  if (zones.length) return;
+  try { zones = await (await fetch("/zones.json")).json(); } catch {}
+  try { countryLang = await (await fetch("/country-lang.json")).json(); } catch {}
+}
+
+async function settingsDialog() {
+  await ensureZones();
+  const sysName = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const note = el("div", {className: "hint"}), langNote = el("div", {className: "hint", dir: "ltr"});
+
+  const langCombo = combo(langItems(), lang);
+
+  const cItems = [{value: "", label: t("set.system") + (sysName ? ` (${sysName})` : ""), search: "system auto"}]
+    .concat(zones.map(z => ({value: z.c, label: countryName(z.c), hint: z.c, search: z.n + " " + z.z.join(" ") + " " + nativeName(z.c)})))
+    .sort((a, b) => (a.value === "" ? -1 : b.value === "" ? 1 : a.label.localeCompare(b.label, lang)));
+  let zoneCombo = null;
+  const zoneBox = el("div", {style: "margin-top:8px"});
+  const countryCombo = combo(cItems, prefs.country || "", c => { fillZones(); suggestLang(c); });
+
+  function fillZones() {
+    const z = zones.find(x => x.c === countryCombo.get());
+    zoneBox.replaceChildren(); zoneCombo = null;
+    if (z && z.z.length > 1) {
+      zoneCombo = combo(z.z.map(n => ({value: n, label: zoneLabel(n), hint: n, search: n})), z.z.includes(prefs.timezone) ? prefs.timezone : z.z[0], showNote);
+      zoneBox.append(zoneCombo.el);
+    }
+    showNote();
+  }
+  function chosenZone() {
+    const z = zones.find(x => x.c === countryCombo.get());
+    return z ? (zoneCombo ? zoneCombo.get() : z.z[0]) : "";
+  }
+  function suggestLang(c) {
+    const l = countryLang[c];
+    langNote.textContent = "";
+    if (l && LANGS[l] && l !== langCombo.get()) {
+      langCombo.set(l);
+      langNote.textContent = "→ " + LANGS[l][0];
+    }
+  }
+  function showNote() {
+    const zn = chosenZone() || sysName;
+    let off = 0;
+    try {
+      const p = new Intl.DateTimeFormat("en", {timeZone: zn, timeZoneName: "longOffset"}).formatToParts(new Date()).find(x => x.type === "timeZoneName").value;
+      const m = /GMT([+-])(\d\d):(\d\d)/.exec(p);
+      if (m) off = (m[1] === "-" ? -1 : 1) * (m[2] * 3600 + m[3] * 60);
+    } catch {}
+    note.textContent = t("set.tzNote", {offset: `${zn} · ${offsetLabel(off)}`, time: clockIn(zn)});
+    note.dir = "auto";
+  }
+  fillZones();
+
+  const themeSel = el("select", {}, ...["", "light", "dark"].map(v => el("option", {value: v, textContent: themeName(v)})));
+  themeSel.value = prefs.theme || "";
+  const cm = el("select", {}, ...["worklog", "comment", "both"].map(k => el("option", {value: k, textContent: t("cm." + k)})));
+  cm.value = prefs.commentMode || "worklog";
+  const st = el("textarea", {rows: 2, value: prefs.startTransitions || "", placeholder: "In Progress", className: "ltr", spellcheck: false});
+
+  const selOf = (opts, cur) => { const sel = el("select", {}, ...opts.map(([v, k]) => el("option", {value: v, textContent: t(k)}))); sel.value = cur || ""; return sel; };
+  const lockSel = selOf([["", "lock.none"], ["pause", "lock.pause"], ["resume", "lock.resume"]], prefs.lockMode);
+  const exitSel = selOf([["", "exit.keep"], ["pause", "exit.pause"], ["reset", "exit.reset"]], prefs.exitMode);
+  const updChk = el("input", {type: "checkbox", checked: prefs.updateCheck !== false});
+  const updRow = prefs.updateEnabled ? el("label", {className: "check"}, updChk, " ", t("set.update")) : el("span");
+  const body = el("div", {}, field(t("set.language"), langCombo.el), langNote, field(t("theme.label"), themeSel),
+    field(t("set.country"), countryCombo.el), zoneBox, note,
+    field(t("set.commentMode"), cm), field(t("set.startTransitions"), st), el("div", {className: "hint", textContent: t("set.startHint")}),
+    field(t("set.lock"), lockSel), field(t("set.exit"), exitSel), updRow);
+  const {close, form} = modal(t("set.title"), "", body,
+    close => [cancelBtn(close), el("button", {type: "submit", className: "btn", textContent: t("btn.save")})]);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const next = {lockMode: lockSel.value, exitMode: exitSel.value, ...(prefs.updateEnabled ? {updateCheck: updChk.checked} : {}), theme: themeSel.value, lang: langCombo.get(), country: countryCombo.get(), timezone: chosenZone(),
+      commentMode: cm.value === "worklog" ? "" : cm.value, startTransitions: st.value};
+    try {
+      await api("POST", "/api/settings", next);
+      Object.assign(prefs, next);
+      close(); await applyI18n(); await refresh(); toast(t("set.saved"));
+    } catch (ex) { toast(ex.message, true); }
+  };
+}
+
+/* ---------- add by key ---------- */
+$("#addForm").onsubmit = async e => {
+  e.preventDefault();
+  const key = $("#addKey").value.trim();
+  if (!key) return;
+  await addIssue(key); $("#addKey").value = "";
+};
+async function addIssue(key) {
+  try { await api("POST", "/api/timers", {key}); await refresh(); }
+  catch (ex) { toast(ex.message, true); }
+}
+
+/* ---------- issue browser ---------- */
+let src = "recent", listData = [], listSeq = 0;
+$("#tabs").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  for (const x of $("#tabs").children) x.classList.toggle("on", x === b);
+  src = b.dataset.src; $("#q").value = "";
+  $("#filterbar").classList.toggle("hidden", src !== "filter");
+  if (src === "filter") loadFilters(); else loadList();
+};
+let qTimer;
+$("#q").oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(loadList, 350); };
+$("#reload").onclick = () => { if (src === "filter" && !filterCombo) loadFilters(); else loadList(); };
+
+let filterCombo = null;
+async function loadFilters() {
+  if (!filterCombo) {
+    try {
+      const f = await api("GET", "/api/filters");
+      if (!f.length) { setList([], "list.noFilters"); return; }
+      filterCombo = combo(f.map(x => ({value: x.id, label: x.name})), f[0].id, loadList);
+      $("#filterbar").replaceChildren(filterCombo.el);
+    } catch (ex) { setList([], ex.message, true); return; }
+  }
+  loadList();
+}
+
+async function loadList() {
+  const seq = ++listSeq, q = $("#q").value.trim();
+  let url = "/api/issues?src=" + src;
+  if (q) url = "/api/issues?src=search&q=" + encodeURIComponent(q);
+  else if (src === "filter") { if (!filterCombo) return; url += "&filter=" + filterCombo.get(); }
+  loading = true;
+  $("#list").replaceChildren(el("div", {className: "note"}, el("span", {className: "spin"})));
+  try {
+    const d = await api("GET", url);
+    if (seq === listSeq) { loading = false; setList(d, "list.none"); }
+  } catch (ex) { if (seq === listSeq) { loading = false; setList([], ex.message, true); } }
+}
+function setList(d, msg, raw) { listData = d; listMsg = raw ? msg : t(msg); listKey = raw ? null : msg; renderList(); }
+let listMsg = "", listKey = "list.none", loading = false;
+function renderList() {
+  const box = $("#list");
+  if (loading) return;
+  box.replaceChildren();
+  if (!listData.length) { box.append(el("div", {className: "note", textContent: listKey ? t(listKey) : listMsg})); return; }
+  const have = new Set(timers.map(x => x.key));
+  for (const i of listData) {
+    const b = el("button", {className: "issue" + (have.has(i.key) ? " added" : ""), title: i.summary},
+      el("div", {className: "t"}, el("b", {textContent: i.key, dir: "ltr"}), el("span", {className: "pill", textContent: i.status, dir: "auto"})),
+      el("div", {className: "s", dir: "auto", textContent: i.summary}));
+    b.onclick = () => have.has(i.key) ? toast(t("list.already", {key: i.key})) : addIssue(i.key);
+    box.append(b);
+  }
+}
+
+/* ---------- keyboard shortcuts (same as the original StopWatch) ---------- */
+const typing = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+document.addEventListener("keydown", e => {
+  if (!e.ctrlKey || e.altKey || e.metaKey || $("#app").classList.contains("hidden") || document.querySelector(".scrim")) return;
+  const x = selected();
+  const run = f => { e.preventDefault(); f(); };
+  switch (e.key) {
+    case "ArrowUp": if (x) run(() => move(x.key, -1)); break;
+    case "ArrowDown": if (x) run(() => move(x.key, 1)); break;
+    case "p": case "P": if (x) run(() => { selKey = x.key; act(`/api/timers/${x.key}/${x.running ? "pause" : "start"}`); }); break;
+    case "l": case "L": if (x) run(() => logDialog(x)); break;
+    case "e": case "E": if (x) run(() => editTime(x)); break;
+    case "r": case "R": if (x) run(() => act(`/api/timers/${x.key}/reset`)); break;
+    case "Delete": if (x) run(() => { if (!x.running || confirm(t("timer.confirmRemove"))) act(`/api/timers/${x.key}`, "DELETE"); }); break;
+    case "i": case "I": case "n": case "N": run(() => $("#addKey").focus()); break;
+    case "o": case "O": if (x) run(() => window.open(`${site}/browse/${x.key}`, "_blank", "noopener")); break;
+    case "c": case "C": if (x && !typing(e) && !getSelection().toString()) run(() => navigator.clipboard?.writeText(x.key)); break;
+  }
+});
+// Ctrl+V outside a text field adds the pasted issue key or Jira URL.
+document.addEventListener("paste", e => {
+  if (typing(e) || $("#app").classList.contains("hidden") || document.querySelector(".scrim")) return;
+  const text = e.clipboardData?.getData("text")?.trim();
+  if (text) { e.preventDefault(); addIssue(text.slice(0, 500)); }
+});
+
+/* ---------- mini window: Document Picture-in-Picture is an always-on-top window (Chrome/Edge 116+) ---------- */
+let mini = null;
+if ("documentPictureInPicture" in window) $("#miniBtn").classList.remove("hidden");
+$("#miniBtn").onclick = async () => {
+  if (mini) { mini.close(); return; }
+  try {
+    mini = await documentPictureInPicture.requestWindow({width: 340, height: 220});
+  } catch { return; }
+  for (const st of document.querySelectorAll("style")) mini.document.head.append(st.cloneNode(true));
+  mini.document.documentElement.dir = document.documentElement.dir;
+  mini.document.documentElement.lang = lang;
+  mini.document.body.className = "mini";
+  mini.addEventListener("pagehide", () => { mini = null; miniSig = ""; });
+  miniSig = "";
+  renderMini();
+};
+let miniSig = "";
+function renderMini() {
+  if (!mini) return;
+  const sig = [document.documentElement.dataset.theme, lang, ...timers.map(x => x.key + x.running + x.summary + x.status)].join("|");
+  if (sig === miniSig) {   // same layout: just refresh the clocks so buttons aren't rebuilt under the pointer
+    for (const sp of mini.document.querySelectorAll("[data-t]")) { const x = timers.find(y => y.key === sp.dataset.t); if (x) sp.textContent = fmt(elapsed(x), true); }
+    const tot = mini.document.querySelector(".total"); if (tot) tot.textContent = fmt(timers.reduce((a, x) => a + elapsed(x), 0));
+    return;
+  }
+  miniSig = sig;
+  const d = mini.document, th = document.documentElement.dataset.theme;
+  if (th) d.documentElement.dataset.theme = th; else delete d.documentElement.dataset.theme;
+  const rows = [...timers].sort((a, b) => b.running - a.running).slice(0, 8).map(x => {
+    const b = el("button", {className: "play", textContent: x.running ? "⏸" : "▶", title: t(x.running ? "timer.pause" : "timer.start")});
+    b.style.cssText = "width:30px;height:30px;font-size:13px;flex:none";
+    b.onclick = () => act(`/api/timers/${x.key}/${x.running ? "pause" : "start"}`);
+    const k = el("div", {style: "min-width:0;flex:1"}, el("b", {textContent: x.key, dir: "ltr", style: "color:var(--link)"}),
+      el("div", {className: "proj", textContent: x.summary, dir: "auto", style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis"}));
+    const tm = el("span", {className: "mono", textContent: fmt(elapsed(x), true), dir: "ltr", style: "font-weight:600"});
+    tm.dataset.t = x.key;
+    return el("div", {style: "display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--line)"}, b, k, tm);
+  });
+  const total = timers.reduce((a, x) => a + elapsed(x), 0);
+  d.body.replaceChildren(el("div", {style: "padding:8px 10px"},
+    el("div", {style: "display:flex;justify-content:space-between;margin-bottom:4px"}, el("b", {textContent: "Jira StopWatch NextGen"}), el("span", {className: "total", textContent: fmt(total)})), ...rows));
+}
+
+/* ---------- update notice (only when the build knows its release repo) ---------- */
+async function checkUpdateBanner() {
+  if (!prefs.updateEnabled || prefs.updateCheck === false) return;
+  try {
+    const u = await api("GET", "/api/update");
+    if (!u.newer) return;
+    $("#updtext").textContent = t("upd.available", {0: u.latest});
+    $("#updlink").textContent = t("upd.get"); $("#updlink").href = u.url;
+    $("#updbar").classList.remove("hidden");
+  } catch {}
+}
+$("#updx").onclick = () => $("#updbar").classList.add("hidden");
+
+/* ---------- boot ---------- */
+setInterval(() => fetch("/api/ping").catch(() => {}), 10000);
+
+(async () => {
+  try {
+    const s = await api("GET", "/api/session");
+    prefs = s.prefs;
+    await applyI18n();
+    if (s.loggedIn) await enterApp(s.user, s);
+    else showLogin(s);
+  } catch (e) { document.body.textContent = e.message; }
+})();
+</script>
+</body>
+</html>

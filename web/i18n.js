@@ -49,7 +49,7 @@ const EN_VALUES = [
   "Create one at {link}. Your account password won't work on Cloud.",
   "In Jira: your avatar → Profile → Personal Access Tokens → Create token.",
   "Use this if you don't have a token. Some servers lock the account after repeated wrong passwords.",
-  "Remember me on this computer", "The secret is stored in your user config folder (readable only by you).", "Sign in", "Signing in…",
+  "Remember me on this computer", "The secret is kept in your system's secure credential store (or, if there is none, in a file only you can read).", "Sign in", "Signing in…",
   "Total", "⏸ Pause all", "Settings", "Sign out", "Pause others when starting a timer",
   "Add issue by key, e.g. ABC-123 — or pick one from the list", "Add", "No issues yet", "Add an issue by key above or pick one from the list.",
   "Start", "Pause", "Click to edit time", "Log work", "Post worklog to Jira", "Remove from list", "This timer is running. Remove it anyway?",

@@ -232,6 +232,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	// Empty token + saved credentials = "continue as saved user".
 	if req.Token == "" && saved.Token != "" {
 		req.Mode, req.Site, req.Email, req.Token = saved.Mode, saved.Site, saved.Email, saved.Token
+		req.Remember = true // signing in with what was remembered keeps it remembered
 	}
 	site, err := jira.NormalizeSite(req.Site)
 	if err != nil {

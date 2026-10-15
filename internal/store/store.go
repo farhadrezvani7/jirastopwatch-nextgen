@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
+
+	"jirastopwatch-nextgen/internal/secret"
 
 	_ "time/tzdata" // Windows has no system zoneinfo; embed it so named zones always load
 )
@@ -15,7 +18,7 @@ type Config struct {
 	Site        string `json:"site,omitempty"`
 	Mode        string `json:"mode,omitempty"`  // cloud | pat | basic
 	Email       string `json:"email,omitempty"` // email or username
-	Token       string `json:"token,omitempty"` // API token / PAT / password; only if "remember me"
+	Token       string `json:"token,omitempty"` // API token / PAT / password; only if "remember me". Lives in the OS credential store; this field is the file fallback when none is available
 	PauseOthers bool   `json:"pauseOthers"`
 
 	LockMode         string `json:"lockMode,omitempty"` // "" (ignore) | pause | resume: what to do with running timers when the session locks
@@ -48,15 +51,61 @@ func Dir() string {
 	return filepath.Join(d, "jirastopwatch-nextgen")
 }
 
+// keychain mirrors what is in the OS credential store so Save only talks to it when the token changes.
+var keychain struct {
+	mu    sync.Mutex
+	known bool
+	val   string
+}
+
 func Load() Config {
 	c := Config{PauseOthers: true}
 	if b, err := os.ReadFile(filepath.Join(Dir(), "config.json")); err == nil {
 		_ = json.Unmarshal(b, &c)
 	}
+	keychain.mu.Lock()
+	defer keychain.mu.Unlock()
+	if c.Token == "" {
+		v, err := secret.Get()
+		keychain.known, keychain.val = err == nil || err == secret.ErrNotFound, v
+		c.Token = v
+		return c
+	}
+	// A token found in the file (older versions, or no credential store): move it into the store if possible.
+	if secret.Set(c.Token) == nil {
+		keychain.known, keychain.val = true, c.Token
+		_ = write(withoutToken(c))
+	}
 	return c
 }
 
+func withoutToken(c Config) Config { c.Token = ""; return c }
+
+// Save writes the config. The token goes to the OS credential store when one
+// works; otherwise it stays in the (owner-only) config file.
 func Save(c Config) error {
+	keychain.mu.Lock()
+	defer keychain.mu.Unlock()
+	disk := c
+	switch {
+	case c.Token == "":
+		if !keychain.known || keychain.val != "" {
+			if err := secret.Delete(); err == nil {
+				keychain.known, keychain.val = true, ""
+			}
+		}
+	case keychain.known && keychain.val == c.Token:
+		disk.Token = ""
+	default:
+		if err := secret.Set(c.Token); err == nil {
+			keychain.known, keychain.val = true, c.Token
+			disk.Token = ""
+		}
+	}
+	return write(disk)
+}
+
+func write(c Config) error {
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {
 		return err
 	}

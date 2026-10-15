@@ -123,7 +123,7 @@ Multiple stopwatches · pause others when one starts · edit time · remaining-e
 ## Privacy & security
 - Your data goes **only to your own Jira site** — nothing else is contacted (the update check is off unless a release repo is configured at build time, and can be switched off in Settings).
 - The local web server listens on `127.0.0.1` on a random port and requires a per-launch secret, so other websites and other users of the machine cannot talk to it.
-- If **Remember me** is ticked, the token is stored in the app's config folder as a file readable only by your user. It is **not** encrypted at rest; on shared computers leave *Remember me* off.
+- If **Remember me** is ticked, the token is kept in your operating system's credential store: Windows Credential Manager, the macOS Keychain, or the Linux Secret Service (GNOME Keyring / KWallet; needs the `secret-tool` command from `libsecret-tools`). If none is available, it falls back to a file in the app's config folder that only your user can read, **not** encrypted. Old versions' plain-text tokens are moved into the credential store automatically. On shared computers leave *Remember me* off.
 - Config and timers live in `~/.config/jirastopwatch-nextgen` (Linux), `%AppData%\jirastopwatch-nextgen` (Windows) or `~/Library/Application Support/jirastopwatch-nextgen` (macOS).
 
 ## Not included (compared with the original)

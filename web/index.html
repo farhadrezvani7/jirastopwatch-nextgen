@@ -210,6 +210,7 @@ aside{border-inline-start:1px solid var(--line);background:var(--nav);display:fl
     <button class="iconbtn hidden" id="miniBtn" type="button" data-tip="mini.tip">⧉</button>
     <button class="iconbtn themebtn" data-themebtn type="button"></button>
     <button class="iconbtn" id="pauseAll" data-i18n="hdr.pauseAll"></button>
+    <button class="iconbtn themebtn" id="signOutBtn" type="button" data-tip="menu.signOut" aria-label="Sign out"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>
     <div class="user">
       <button class="iconbtn" id="userBtn"></button>
       <div class="menu card hidden" id="menu">
@@ -366,7 +367,7 @@ async function applyI18n() {
   applyTheme();
   for (const e of document.querySelectorAll("[data-i18n]")) e.textContent = t(e.dataset.i18n);
   for (const e of document.querySelectorAll("[data-ph]")) e.placeholder = t(e.dataset.ph);
-  for (const e of document.querySelectorAll("[data-tip]")) e.title = t(e.dataset.tip);
+  for (const e of document.querySelectorAll("[data-tip]")) e.title = e.ariaLabel = t(e.dataset.tip);
   loginLangCombo = combo(langItems(), lang, async v => {
     prefs.lang = v;
     await applyI18n();
@@ -486,10 +487,11 @@ async function enterApp(user, sess) {
 /* ---------- header menu ---------- */
 $("#userBtn").onclick = e => { e.stopPropagation(); $("#menu").classList.toggle("hidden"); };
 document.addEventListener("click", e => { if (!e.target.closest("#menu")) $("#menu").classList.add("hidden"); });
-$("#signOut").onclick = async () => {
+async function signOut() {
   await api("POST", "/api/logout");
   showLogin(await api("GET", "/api/session"));
-};
+}
+$("#signOut").onclick = $("#signOutBtn").onclick = signOut;
 $("#optPause").onchange = e => api("POST", "/api/settings", {pauseOthers: e.target.checked}).then(() => pauseOthers = e.target.checked);
 $("#pauseAll").onclick = async () => { await api("POST", "/api/timers/pause-all"); refresh(); };
 $("#openSettings").onclick = () => { $("#menu").classList.add("hidden"); settingsDialog(); };

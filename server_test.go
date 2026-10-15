@@ -198,6 +198,15 @@ func TestRememberedLoginSurvivesRestart(t *testing.T) {
 		t.Fatalf("auto sign-in with saved credentials: %d %v", c, m)
 	}
 
+	// ...and the sign-in after that one too (auto sign-in must not forget the token).
+	third := newServer()
+	if c, m := post(third, "/api/login", `{}`); c != 200 {
+		t.Fatalf("second auto sign-in: %d %v", c, m)
+	}
+	if newServer().cfg.Token == "" {
+		t.Fatal("auto sign-in wiped the remembered token")
+	}
+
 	// Signing out forgets the token, and an empty login then fails.
 	post(second, "/api/logout", "")
 	if c, _ := post(newServer(), "/api/login", `{}`); c == 200 {

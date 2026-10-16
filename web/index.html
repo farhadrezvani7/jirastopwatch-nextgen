@@ -290,6 +290,7 @@ function fmt(sec, withSec) {
 /* ---------- i18n ---------- */
 let prefs = {theme: "", lang: "", country: "", timezone: "", commentMode: "", startTransitions: ""};
 let zoneInfo = null;     // {name, offsetSec, nowUnix} from /api/state
+let clock = null;        // Jira server clock vs ours, from /api/session: {mode, advice, known, serverOffsetSec, localOffsetSec, mismatch, key}
 
 /* searchable dropdown: items are {value, label, hint?, search?}; typing filters (accent-insensitive) */
 function combo(items, value, onChange, opts = {}) {
@@ -472,7 +473,7 @@ $("#loginForm").addEventListener("submit", async e => {
 });
 
 async function enterApp(user, sess) {
-  me = user; site = sess.site; pauseOthers = sess.pauseOthers; prefs = sess.prefs;
+  me = user; site = sess.site; pauseOthers = sess.pauseOthers; prefs = sess.prefs; clock = sess.time;
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#userBtn").textContent = user.displayName + " ▾";
@@ -483,6 +484,7 @@ async function enterApp(user, sess) {
   await applyI18n();
   await refresh();
   loadList();
+  setTimeout(clockNotice, 700);
   setTimeout(checkUpdateBanner, 4000);
 }
 
@@ -632,19 +634,25 @@ async function logDialog(x) {
     if (!me || !me.timeZone || !zoneInfo || !started.value) return;
     try {
       const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(started.value);
-      const instant = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) - zoneInfo.offsetSec * 1000;   // `started` is wall-clock time in our zone
+      const eff = serverClockOn() ? clock.serverOffsetSec : zoneInfo.offsetSec;   // the clock the time is written on
+      const instant = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) - eff * 1000;
       const p = new Intl.DateTimeFormat("en", {timeZone: me.timeZone, timeZoneName: "longOffset"}).formatToParts(new Date(instant)).find(x => x.type === "timeZoneName").value;
       const o = /GMT([+-])(\d\d):(\d\d)/.exec(p), off = o ? (o[1] === "-" ? -1 : 1) * (o[2] * 3600 + o[3] * 60) : 0;
-      if (off === zoneInfo.offsetSec) return;   // same clock, nothing to explain
+      if (off === eff) return;   // same clock, nothing to explain
       const when = new Intl.DateTimeFormat("en-CA", {timeZone: me.timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"}).format(new Date(instant)).replace(",", "");
       jz.textContent = t("log.jiraZone", {zone: me.timeZone, time: when});
       jz.dir = "auto";
     } catch {}
   };
-  started.addEventListener("input", showJiraZone);
+  const serverClockOn = () => !!clock && clock.mode === "server" && clock.known;
+  const sn = el("div", {className: "hint", dir: "auto"});
+  const showServerNote = () => { sn.textContent = serverClockOn() && started.value ? t("tm.logNote", {server: offsetLabel(clock.serverOffsetSec), time: started.value.replace("T", " ")}) : ""; };
+  started.addEventListener("input", () => { showJiraZone(); showServerNote(); });
+  time.addEventListener("input", () => setTimeout(showServerNote, 600));
+  setTimeout(showServerNote, 0);
   time.addEventListener("input", () => setTimeout(showJiraZone, 600));
   setTimeout(showJiraZone, 0);
-  const body = el("div", {}, el("div", {className: "row"}, field(t("log.time"), time), el("div", {}, field(t("log.started"), started), tz, jz)),
+  const body = el("div", {}, el("div", {className: "row"}, field(t("log.time"), time), el("div", {}, field(t("log.started"), started), tz, sn, jz)),
     field(t("log.comment"), comment), field(t("log.status"), trans),
     field(t("est.label"), est), estVal);
   const submit = el("button", {type: "submit", className: "btn", textContent: t("log.btn")});
@@ -737,8 +745,13 @@ async function settingsDialog() {
   const exitSel = selOf([["", "exit.keep"], ["pause", "exit.pause"], ["reset", "exit.reset"]], prefs.exitMode);
   const updChk = el("input", {type: "checkbox", checked: prefs.updateCheck !== false});
   const updRow = prefs.updateEnabled ? el("label", {className: "check"}, updChk, " ", t("set.update")) : el("span");
+  // Shown only when it matters: the server clock differs from the user's, or the workaround is already on.
+  const tmShown = !!clock && clock.known && (clock.mismatch || clock.mode === "server");
+  const tmSel = el("select", {}, el("option", {value: "", textContent: t("tm.modeExact")}), el("option", {value: "server", textContent: t("tm.modeServer")}));
+  tmSel.value = clock && clock.mode === "server" ? "server" : "";
+  const tmField = tmShown ? el("div", {}, field(t("set.timeMode"), tmSel), el("div", {className: "hint", dir: "auto", textContent: t("tm.settingNote", clockVars())})) : el("span");
   const body = el("div", {}, field(t("set.language"), langCombo.el), langNote, field(t("theme.label"), themeSel),
-    field(t("set.country"), countryCombo.el), zoneBox, note,
+    field(t("set.country"), countryCombo.el), zoneBox, note, tmField,
     field(t("set.commentMode"), cm), field(t("set.startTransitions"), st), el("div", {className: "hint", textContent: t("set.startHint")}),
     field(t("set.lock"), lockSel), field(t("set.exit"), exitSel), updRow);
   const {close, form} = modal(t("set.title"), "", body,
@@ -747,9 +760,11 @@ async function settingsDialog() {
     e.preventDefault();
     const next = {lockMode: lockSel.value, exitMode: exitSel.value, ...(prefs.updateEnabled ? {updateCheck: updChk.checked} : {}), theme: themeSel.value, lang: langCombo.get(), country: countryCombo.get(), timezone: chosenZone(),
       commentMode: cm.value === "worklog" ? "" : cm.value, startTransitions: st.value};
+    if (tmShown) next.timeMode = tmSel.value;
     try {
       await api("POST", "/api/settings", next);
       Object.assign(prefs, next);
+      clock = (await api("GET", "/api/session")).time;
       close(); await applyI18n(); await refresh(); toast(t("set.saved"));
     } catch (ex) { toast(ex.message, true); }
   };
@@ -903,6 +918,28 @@ async function checkUpdateBanner() {
   } catch {}
 }
 $("#updx").onclick = () => $("#updbar").classList.add("hidden");
+
+/* ---------- Jira server clock vs ours ---------- */
+// Jira keeps the exact moment, but its reports group days by the server's clock. If the server is set to another
+// zone than its users, tell the user and let them choose; the choice stays in Settings.
+const clockVars = () => ({server: offsetLabel(clock.serverOffsetSec), local: offsetLabel(clock.localOffsetSec)});
+async function setClock(patch) {
+  try { await api("POST", "/api/settings", patch); clock = (await api("GET", "/api/session")).time; }
+  catch (ex) { toast(ex.message, true); }
+}
+function clockNotice() {
+  if (!clock || !clock.advice) return;
+  const ask = clock.advice === "ask", key = clock.key;
+  const btn = (text, cls, fn) => el("button", {type: "button", className: cls, textContent: text, onclick: fn});
+  const {close} = modal(t("set.timeMode"), "", el("p", {textContent: t(ask ? "tm.body" : "tm.fixedBody", clockVars()), dir: "auto"}),
+    close => ask ? [
+      btn(t("tm.match"), "btn ghost", async () => { await setClock({timeMode: "server"}); close(); }),
+      btn(t("tm.keep"), "btn", async () => { await setClock({timeAck: key}); close(); }),
+    ] : [
+      btn(t("tm.stay"), "btn ghost", async () => { await setClock({timeAck: "fixed"}); close(); }),
+      btn(t("tm.switchBack"), "btn", async () => { await setClock({timeMode: ""}); close(); }),
+    ]);
+}
 
 /* ---------- install updates ---------- */
 async function updateFlow() {

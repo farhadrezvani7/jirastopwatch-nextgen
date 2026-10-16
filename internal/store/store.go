@@ -29,6 +29,8 @@ type Config struct {
 	Country          string `json:"country,omitempty"`          // ISO 3166 code picked for the time zone; empty = system
 	Timezone         string `json:"timezone,omitempty"`         // IANA zone used for worklog start times; empty = system
 	CommentMode      string `json:"commentMode,omitempty"`      // worklog (default) | comment | both
+	TimeMode         string `json:"timeMode,omitempty"`         // "" = send the exact moment (standard) | server = write the local clock time on the Jira server's clock
+	TimeAck          string `json:"timeAck,omitempty"`          // which clock-difference notice the user has already answered
 	StartTransitions string `json:"startTransitions,omitempty"` // status names to move an issue to when its timer starts, one per line
 }
 

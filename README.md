@@ -111,6 +111,7 @@ Multiple stopwatches · pause others when one starts · edit time · remaining-e
 - 🪟 **Mini window** — a small always-on-top floating timer with play/pause (Chrome/Edge 116+).
 - 🔒 **Pause on lock** — pause running timers when the computer locks and optionally resume on unlock (Linux with systemd-logind, Windows, macOS).
 - 🔗 **Paste a Jira link** — `Ctrl+V` anywhere adds the issue from a `/browse/ABC-123` or board URL.
+- 🕒 **Jira server-clock aware** — Jira stores the exact moment, but its reports group days by the *server's* time zone. If that differs from yours (and from your Jira profile), the app tells you and lets you opt in to writing your local clock time on the server's clock so reports land on the right day; switch back in Settings any time (the app also offers it once the server's zone is fixed).
 - 🔑 **Stays signed in** — your token is kept in the system credential store and the app signs you in on launch.
 - ⬆️ **One-click updates** — *Check for updates* downloads, verifies and installs the new version for you.
 

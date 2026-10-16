@@ -196,6 +196,23 @@ func (c *Client) Myself(ctx context.Context) (*User, error) {
 	return &u, nil
 }
 
+// ServerOffset returns the UTC offset (seconds) of the Jira server's clock, read from the
+// timestamp it reports. ok is false if it can't be determined.
+func (c *Client) ServerOffset(ctx context.Context) (off int, ok bool) {
+	var info struct {
+		ServerTime string `json:"serverTime"`
+	}
+	if err := c.do(ctx, "GET", "/rest/api/2/serverInfo", nil, nil, &info); err != nil {
+		return 0, false
+	}
+	t, err := time.Parse("2006-01-02T15:04:05.000-0700", info.ServerTime)
+	if err != nil {
+		return 0, false
+	}
+	_, off = t.Zone()
+	return off, true
+}
+
 // HoursPerDay returns Jira's configured working hours per day (8 on failure).
 func (c *Client) HoursPerDay(ctx context.Context) float64 {
 	var cfg struct {

@@ -29,7 +29,9 @@ func (f *fakeJira) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 	switch {
 	case r.URL.Path == "/rest/api/2/myself":
-		_, _ = w.Write([]byte(`{"displayName":"Test User","emailAddress":"t@example.com"}`))
+		_, _ = w.Write([]byte(`{"displayName":"Test User","emailAddress":"t@example.com","timeZone":"Asia/Tehran"}`))
+	case r.URL.Path == "/rest/api/2/serverInfo":
+		_, _ = w.Write([]byte(`{"serverTime":"2026-10-15T23:34:03.378+0000"}`)) // a Jira server set to UTC
 	case r.URL.Path == "/rest/api/2/configuration":
 		_, _ = w.Write([]byte(`{"timeTrackingConfiguration":{"workingHoursPerDay":8}}`))
 	case r.URL.Path == "/rest/api/2/issue/ABC-1" && r.Method == "GET":
@@ -223,5 +225,101 @@ func TestDefaultStartEndsNow(t *testing.T) {
 	}
 	if got := defaultStart(now, 0).In(tehran).Format(localLayout); got != "2026-10-16T02:59" {
 		t.Errorf("empty timer start = %s", got)
+	}
+}
+
+// Jira groups by day on the server's clock. In "server clock" mode the time the user entered (Tehran, 03:21)
+// must be written as 03:21 on the server's UTC clock; in the standard mode it stays the exact moment.
+func TestServerClockModeWritesLocalReadingOnServerClock(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	fj := &fakeJira{}
+	jsrv := httptest.NewServer(fj)
+	defer jsrv.Close()
+	s := newServer()
+	call := func(method, path, body string) (int, map[string]any) {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Host = "127.0.0.1"
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, req)
+		var m map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&m)
+		return w.Code, m
+	}
+	tm := func() map[string]any { _, m := call("GET", "/api/session", ""); return m["time"].(map[string]any) }
+	logAt := func() string {
+		fj.mu.Lock()
+		fj.body = nil
+		fj.mu.Unlock()
+		if c, m := call("POST", "/api/timers/ABC-1/log", `{"time":"1m","started":"2026-10-16T03:21","estimate":"leave"}`); c != 200 {
+			t.Fatalf("log %d %v", c, m)
+		}
+		fj.mu.Lock()
+		defer fj.mu.Unlock()
+		return fj.body["POST /rest/api/2/issue/ABC-1/worklog"]
+	}
+
+	call("POST", "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`)
+	call("POST", "/api/settings", `{"timezone":"Asia/Tehran","country":"IR"}`)
+	call("POST", "/api/timers", `{"key":"abc-1"}`)
+
+	if got := tm(); got["advice"] != "ask" || got["serverOffsetSec"] != float64(0) || got["localOffsetSec"] != float64(12600) {
+		t.Fatalf("expected a clock-difference notice before any choice: %v", got)
+	}
+	if wl := logAt(); !strings.Contains(wl, `"started":"2026-10-16T03:21:00.000+0330"`) {
+		t.Errorf("standard mode must keep the exact moment: %s", wl)
+	}
+
+	// Answering "keep exact" (the page sends the notice's key back) stops the notice from coming back.
+	call("POST", "/api/settings", `{"timeAck":"`+tm()["key"].(string)+`"}`)
+	if got := tm(); got["advice"] != "" {
+		t.Errorf("notice came back after an answer: %v", got)
+	}
+	// The server-clock choice writes the same reading on the server's clock.
+	call("POST", "/api/settings", `{"timeMode":"server"}`)
+	if wl := logAt(); !strings.Contains(wl, `"started":"2026-10-16T03:21:00.000+0000"`) {
+		t.Errorf("server-clock mode: %s", wl)
+	}
+	// ...and going back to standard restores exact moments.
+	call("POST", "/api/settings", `{"timeMode":""}`)
+	if wl := logAt(); !strings.Contains(wl, `+0330"`) {
+		t.Errorf("did not return to exact moments: %s", wl)
+	}
+
+	// Once the server's zone matches the user's, server-clock mode offers to switch back (once).
+	call("POST", "/api/settings", `{"timeMode":"server","timezone":"UTC","country":"GB"}`)
+	if got := tm(); got["advice"] != "fixed" {
+		t.Fatalf("expected the 'server now matches' notice: %v", got)
+	}
+	call("POST", "/api/settings", `{"timeAck":"fixed"}`)
+	if got := tm(); got["advice"] != "" {
+		t.Errorf("'fixed' notice repeated: %v", got)
+	}
+}
+
+func TestTimeAdvice(t *testing.T) {
+	m := clockState{Known: true, ServerOffset: 0, LocalOffset: 12600, ProfileOffset: 12600, HasProfile: true}
+	for _, c := range []struct {
+		name      string
+		mode, ack string
+		st        clockState
+		want      string
+	}{
+		{"mismatch asks", "", "", m, "ask"},
+		{"answered", "", mismatchKey(m), m, ""},
+		{"server unknown", "", "", clockState{LocalOffset: 12600, ProfileOffset: 12600, HasProfile: true}, ""},
+		{"same zone", "", "", clockState{Known: true, ServerOffset: 12600, LocalOffset: 12600, ProfileOffset: 12600, HasProfile: true}, ""},
+		// travelling: the Jira profile is elsewhere, so this is not the server's mistake
+		{"profile elsewhere", "", "", clockState{Known: true, ServerOffset: 0, LocalOffset: 12600, ProfileOffset: 0, HasProfile: true}, ""},
+		{"no profile zone", "", "", clockState{Known: true, ServerOffset: 0, LocalOffset: 12600}, ""},
+		{"server mode, still off", "server", "", m, ""},
+		{"server mode, server fixed", "server", "", clockState{Known: true, ServerOffset: 12600, LocalOffset: 12600}, "fixed"},
+		{"server mode, fixed answered", "server", "fixed", clockState{Known: true, ServerOffset: 12600, LocalOffset: 12600}, ""},
+	} {
+		if got := timeAdvice(c.mode, c.ack, c.st); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
 	}
 }

@@ -35,6 +35,8 @@ type server struct {
 	client      *jira.Client
 	user        *jira.User
 	hoursPerDay float64
+	serverOff   int  // Jira server clock's UTC offset, seconds
+	serverKnown bool // ...if it could be read
 	cfg         store.Config
 
 	timers *timer.Manager
@@ -199,9 +201,25 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 		"email":       s.cfg.Email,
 		"hasSaved":    s.cfg.Token != "",
 		"version":     version,
+		"time":        s.timeInfo(),
 		"pauseOthers": s.cfg.PauseOthers,
 		"prefs":       s.prefs(),
 	})
+}
+
+// timeInfo describes the Jira-server-vs-local clock situation for the page. Callers hold s.mu.
+func (s *server) timeInfo() map[string]any {
+	now := time.Now()
+	_, local := now.In(s.cfg.Location()).Zone()
+	st := clockState{Known: s.serverKnown, ServerOffset: s.serverOff, LocalOffset: local}
+	if s.user != nil {
+		st.ProfileOffset, st.HasProfile = zoneOffset(s.user.TimeZone, now)
+	}
+	return map[string]any{
+		"mode": s.cfg.TimeMode, "advice": timeAdvice(s.cfg.TimeMode, s.cfg.TimeAck, st),
+		"known": st.Known, "serverOffsetSec": st.ServerOffset, "localOffsetSec": local,
+		"mismatch": st.mismatch(), "key": mismatchKey(st),
+	}
 }
 
 // prefs is the user-facing slice of the config (never the secret).
@@ -269,9 +287,11 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hpd := c.HoursPerDay(ctx)
+	srvOff, srvKnown := c.ServerOffset(ctx)
 
 	s.mu.Lock()
 	s.client, s.user, s.hoursPerDay = c, user, hpd
+	s.serverOff, s.serverKnown = srvOff, srvKnown
 	s.cfg.Site, s.cfg.Mode, s.cfg.Email, s.cfg.Token = site, req.Mode, req.Email, ""
 	if req.Remember {
 		s.cfg.Token = req.Token
@@ -308,6 +328,8 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 		Timezone         *string `json:"timezone"`
 		CommentMode      *string `json:"commentMode"`
 		StartTransitions *string `json:"startTransitions"`
+		TimeMode         *string `json:"timeMode"`
+		TimeAck          *string `json:"timeAck"`
 	}
 	if !decode(r, &req) {
 		fail(w, 400, "err.badRequest")
@@ -332,6 +354,10 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	if req.TimeMode != nil && *req.TimeMode != timeExact && *req.TimeMode != timeServer {
+		fail(w, 400, "err.badRequest")
+		return
 	}
 	if req.CommentMode != nil {
 		switch *req.CommentMode {
@@ -371,6 +397,18 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.StartTransitions != nil {
 		s.cfg.StartTransitions = strings.TrimSpace(*req.StartTransitions)
+	}
+	if req.TimeAck != nil {
+		s.cfg.TimeAck = *req.TimeAck
+	}
+	if req.TimeMode != nil && *req.TimeMode != s.cfg.TimeMode {
+		s.cfg.TimeMode = *req.TimeMode
+		// Answering with an explicit choice settles the current notice; a later change of situation asks again.
+		s.cfg.TimeAck = ""
+		if s.cfg.TimeMode == timeExact && s.client != nil {
+			_, local := time.Now().In(s.cfg.Location()).Zone()
+			s.cfg.TimeAck = mismatchKey(clockState{ServerOffset: s.serverOff, LocalOffset: local})
+		}
 	}
 	cfg := s.cfg
 	s.mu.Unlock()
@@ -556,11 +594,15 @@ func (s *server) logWork(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.RLock()
 	loc, mode := s.cfg.Location(), s.cfg.CommentMode
+	srvClock, srvOff := s.cfg.TimeMode == timeServer && s.serverKnown, s.serverOff
 	s.mu.RUnlock()
 	started, err := time.ParseInLocation(localLayout, req.Started, loc)
 	if err != nil {
 		fail(w, 400, "err.badStart")
 		return
+	}
+	if srvClock {
+		started = onServerClock(started, srvOff)
 	}
 	est := jira.Estimate{Method: req.Estimate}
 	switch req.Estimate {

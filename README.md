@@ -21,6 +21,10 @@ Start a timer on an issue, work, press **Log work** — the time lands in Jira a
 |---|---|---|
 | <img src="docs/screenshots/app-dark.png" width="260"> | <img src="docs/screenshots/app-light.png" width="260"> | <img src="docs/screenshots/app-rtl-fa.png" width="260"> |
 
+**Responsive** — the layout adapts down to phone-width windows; the issue list becomes a slide-over panel.
+
+<img src="docs/screenshots/responsive.png" alt="Responsive layout: light, dark, and the slide-over issue list" width="640">
+
 ---
 
 ## Install (two clicks)

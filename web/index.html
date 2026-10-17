@@ -180,18 +180,16 @@ body.dragmode{user-select:none;-webkit-user-select:none;cursor:grabbing}
   .asideclose{display:block;margin:12px 12px 0;align-self:flex-end}
 }
 @media (max-width:600px){
-  .clock,.total span{display:none}
+  .clock,#miniBtn,.total:not(#todayBox){display:none}
   .login-card{padding:22px 18px}
   .langsel{float:none;width:100%;margin:0 0 12px}
   .themewrap{position:static;float:inline-end;margin-bottom:8px}
-  .timer{grid-template-columns:auto minmax(0,1fr);gap:6px 12px;padding:12px}
+  .timer{grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;padding:8px 10px}
   .timer .mv{display:none}
   .timer .play{grid-column:1;grid-row:1/3}
-  .timer .info{grid-column:2;grid-row:1}
+  .timer .info{grid-column:2/4;grid-row:1}
   .timer .time{grid-column:2;grid-row:2;justify-self:start;font-size:20px;padding-inline-start:0}
-  .timer .actions{grid-column:1/-1;grid-row:3;flex-wrap:wrap}
-  .timer .actions button{flex:1}
-  .timer .actions .x{flex:0 0 auto}
+  .timer .actions{grid-column:3;grid-row:2}
   .addrow{flex-wrap:wrap}
   .modal{padding:18px}
   .modal .row{grid-template-columns:1fr}

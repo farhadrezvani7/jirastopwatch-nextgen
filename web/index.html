@@ -552,6 +552,25 @@ $("#loginForm").addEventListener("submit", async e => {
   btn.disabled = false; btn.textContent = t("login.signin");
 });
 
+// The app ended abruptly while timers were running. Nothing was changed: the user decides whether the
+// computer was off (rewind the timers to the last moment the app was alive) or not (keep counting).
+let recoveryShown = false;
+function recoveryDialog(r) {
+  if (recoveryShown) return;
+  recoveryShown = true;
+  const answer = async (action, close) => {
+    try { await api("POST", "/api/recovery", {action}); close(); refresh(); }
+    catch (ex) { toast(ex.message, true); }
+  };
+  let closeFn;
+  const keep = el("button", {type: "button", className: "btn ghost", textContent: t("recover.keep"), onclick: () => answer("keep", closeFn)});
+  const rewind = el("button", {type: "submit", className: "btn", textContent: t("recover.rewind", {0: r.at})});
+  const body = el("p", {dir: "auto", textContent: t("warn.recovered", {0: r.keys.join(", "), 1: r.at})});
+  const {close, form} = modal(t("recover.title"), "", body, () => [keep, rewind]);
+  closeFn = close;
+  form.onsubmit = e => { e.preventDefault(); answer("rewind", close); };
+}
+
 async function enterApp(user, sess) {
   todayByKey = {}; $("#todayTotal").textContent = "–";
   me = user; site = sess.site; pauseOthers = sess.pauseOthers; prefs = sess.prefs; clock = sess.time;
@@ -565,6 +584,7 @@ async function enterApp(user, sess) {
   loadList();
   setTimeout(clockNotice, 700);
   setTimeout(checkUpdateBanner, 4000);
+  if (sess && sess.recovered) setTimeout(() => recoveryDialog(sess.recovered), 600);
 }
 
 /* ---------- profile ---------- */
@@ -1161,8 +1181,6 @@ setInterval(() => fetch("/api/ping").catch(() => {}), 10000);
     const s = await api("GET", "/api/session");
     prefs = s.prefs;
     await applyI18n();
-    // The app ended abruptly last time (crash, power cut): running timers were stopped where they last were.
-    if (s.recovered) setTimeout(() => toast(t("warn.recovered", {0: s.recovered.keys.join(", "), 1: s.recovered.at}), true), 1200);
     if (s.loggedIn) await enterApp(s.user, s);
     else if (s.hasSaved) {
       // Stay signed in: reuse the remembered credentials instead of asking again.

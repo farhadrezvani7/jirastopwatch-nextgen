@@ -274,14 +274,15 @@ func (m *Manager) MoveAfter(key, after string) error {
 	return nil
 }
 
-// PauseRunningAt pauses every running timer as of the given moment (not "now") and returns their
-// keys. It is how time the computer spent switched off after a crash is not counted as work.
-func (m *Manager) PauseRunningAt(at time.Time) []string {
+// RewindTo pauses, as of the moment `at` (not "now"), those timers that are still running from
+// exactly the start time recorded in since. It is used only after the user confirmed that the
+// computer was off (see the crash recovery question); anything the user has since changed is left alone.
+func (m *Manager) RewindTo(since map[string]time.Time, at time.Time) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var keys []string
 	for _, t := range m.timers {
-		if t.RunningSince != nil {
+		if s, ok := since[t.Key]; ok && t.RunningSince != nil && t.RunningSince.Equal(s) {
 			pause(t, at)
 			keys = append(keys, t.Key)
 		}

@@ -71,6 +71,7 @@ func Load() Config {
 	// The config may hold a fallback token: no backup copies of it are kept (see write).
 	_, _ = fsutil.ReadJSONOpts(filepath.Join(Dir(), "config.json"), &c, false)
 	_ = os.Remove(filepath.Join(Dir(), "config.json.bak")) // left by an earlier build that kept one
+	_ = os.Remove(filepath.Join(Dir(), "config.json.tmp")) // a write cut short by a power failure could hold a token
 	keychain.mu.Lock()
 	defer keychain.mu.Unlock()
 	if c.Token == "" {

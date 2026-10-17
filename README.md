@@ -2,7 +2,7 @@
 
 # JiraStopWatch NextGen
 
-**A fast, modern, cross-platform time tracker for Jira — Windows, macOS and Linux.**
+**A fast, modern time tracker for Jira — for Windows and Linux.** (macOS support is built but not available yet: see [macOS](#macos).)
 
 [![CI](https://github.com/farhadrezvani7/jirastopwatch-nextgen/actions/workflows/ci.yml/badge.svg)](https://github.com/farhadrezvani7/jirastopwatch-nextgen/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -39,9 +39,7 @@ Download the file for your system from the [**Releases**](https://github.com/far
    The first time, SmartScreen may say *“Windows protected your PC”* because the file is not code-signed: click **More info → Run anyway**.
 
 ### macOS
-1. Download `jirastopwatch-nextgen-macos-arm64.zip` (Apple Silicon: M1–M4) or `…-macos-amd64.zip` (Intel).
-2. Open the zip and drag **Jira StopWatch NextGen** into **Applications**.
-3. First launch only: the app is signed ad-hoc but not notarized (that needs a paid Apple Developer account), so macOS asks about an "unidentified developer". Open it once, then go to **System Settings → Privacy & Security → Open Anyway**. (On older macOS: right-click the app → **Open**.) If macOS says the app is "damaged", run `xattr -dr com.apple.quarantine "/Applications/Jira StopWatch NextGen.app"` once.
+> ⚠️ **macOS is not available for now.** The macOS groundwork is in the project (a `.app` bundle, signing in the release workflow, the build itself), but running it on a Mac needs an **Apple Developer account** (a paid, yearly membership) to sign and notarize the app so macOS lets people open it — and we don't have one yet. Until we do, **only Windows and Linux users can install** JiraStopWatch NextGen. The macOS files attached to releases are provided as-is for developers and are not supported. Once an Apple account is available, macOS support will be switched on and announced here.
 
 ### Linux
 - **Ubuntu / Debian / Mint:** download `jirastopwatch-nextgen-linux-amd64.deb` (or `…-arm64.deb`), double-click it and press **Install** in the software center.
@@ -85,7 +83,7 @@ The original is a C# / WinForms / .NET Framework desktop app for Windows. NextGe
 
 | | Original jirastopwatch | **JiraStopWatch NextGen** |
 |---|---|---|
-| **Platforms** | Windows only | **Windows, macOS, Linux** (x64 and ARM) |
+| **Platforms** | Windows only | **Windows and Linux** (x64 and ARM); macOS pending an Apple Developer account |
 | **Technology** | C#, WinForms, .NET Framework, RestSharp | **Go**, one self-contained binary, embedded web UI |
 | **Install** | MSI installer + .NET runtime | **Download one file and run it** — no installer, no runtime |
 | **Footprint** *(measured on Linux)* | — | ~6.5 MB binary · server ready in ~40 ms · ~10 MB RAM for the server process (the browser window is extra) |
@@ -98,7 +96,7 @@ The original is a C# / WinForms / .NET Framework desktop app for Windows. NextGe
 | **Log work** | Time, comment, estimate | Same, **plus** change the issue's status in the same step and see the remaining estimate (and what *Auto* will leave) |
 | **Local safety** | — | Server binds to `127.0.0.1` only, per-launch secret token, DNS-rebinding (Host) check |
 | **Data files** | Binary-serialised settings | Human-readable JSON, written atomically, owner-only permissions |
-| **Tests** | NUnit | Go tests, run by CI on **Windows, macOS and Linux** |
+| **Tests** | NUnit | Go tests, run by CI on **Windows and Linux** (and macOS, for the groundwork) |
 
 ### Everything from the original that is kept
 Multiple stopwatches · reorder with ▲▼ · pause others when one starts · edit time · remaining-estimate adjustment (auto / leave / set to / reduce by) · post the note as worklog comment, separate comment, or both · move an issue to e.g. *In Progress* when its timer starts · pause on lock · choose what happens on exit · keyboard shortcuts · optional update notice · max. 20 issues · Apache 2.0.
@@ -139,7 +137,7 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 ---
 
 ## Your time is safe
-- **Crash or power cut** — timers are saved to disk the moment they change, written so that a power failure can't leave an empty file (the data is flushed first and the previous copy is kept as a backup that is used automatically if the file is ever damaged). Running timers are stored as a start time, so the time keeps counting while the app is closed normally. After a crash or power cut the app stops running timers at the last moment it was alive (it records that every 20 seconds) and tells you, so the hours the computer was off are never counted as work.
+- **Crash or power cut** — timers are saved to disk the moment they change, written so that a power failure can't leave an empty file (the data is flushed first and the previous copy is kept as a backup that is used automatically if the file is ever damaged). Running timers are stored as a start time, so the time keeps counting while the app is closed normally. After a crash or power cut the app records that it was last alive (every 20 seconds); on the next start it **asks you** whether the computer was off — *Rewind to that moment and pause* or *Keep counting* — and never changes a timer by itself, so the hours the computer was off are only removed when you confirm it.
 - **Internet drops while logging** — nothing is lost: the timer and your unsent note stay as they were and you can log again. If Jira had already saved the entry before the connection broke, logging again recognises the identical entry (same start minute and length) and does not book it twice. The worklog is posted first and a separate comment after it, so a failure can never duplicate a comment or lose time.
 - **No internet at start-up** — *Continue offline* opens your timers; Jira is reconnected automatically when it is back.
 - **Only one copy at a time** — the running copy holds an operating-system lock (released automatically if it dies), so launching the app again just brings up the running copy and two copies can never overwrite each other's timers.

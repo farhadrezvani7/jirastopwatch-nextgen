@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jirastopwatch-nextgen/internal/fsutil"
 	"jirastopwatch-nextgen/internal/jira"
 	"jirastopwatch-nextgen/internal/store"
 	"jirastopwatch-nextgen/internal/timer"
@@ -58,27 +60,86 @@ type server struct {
 	restartExe string // set once an update is installed: main starts this after shutting down
 	quit       func() // asks main to shut down (set by main)
 
-	recovered *crashInfo // set at start-up after an unclean end; shown to the user once
-
 	pingMu   sync.Mutex
 	lastPing time.Time
 }
 
+// crashInfo is what the page shows when the previous copy did not exit cleanly while timers ran.
 type crashInfo struct {
 	Keys []string `json:"keys"`
-	At   string   `json:"at"` // when the app was last running, local time
+	At   string   `json:"at"` // when the app was last seen running, local time
 }
 
-// recoverFromCrash runs when the previous copy never exited cleanly. Timers that were running
-// are paused at the moment the app was last seen alive, rather than counting the time the computer
-// was off (the page tells the user, who can correct the time).
+// pendingRecovery is kept on disk until the user answers, so the question is not lost by a restart.
+type pendingRecovery struct {
+	Alive  int64                `json:"alive"`  // unix seconds the app was last known to be running
+	Timers map[string]time.Time `json:"timers"` // key -> the start time it was running from
+}
+
+func pendingRecoveryFile() string { return filepath.Join(store.Dir(), "pending-recovery.json") }
+
+// recoverFromCrash runs when the previous copy never exited cleanly. It changes NOTHING by itself:
+// if timers were running across a long gap it only records the question "was the computer off? rewind
+// those timers to the moment the app was last alive, or keep counting?" for the user to answer.
 func (s *server) recoverFromCrash(alive time.Time) {
+	if _, err := os.Stat(pendingRecoveryFile()); err == nil {
+		return // an earlier question is still waiting for an answer
+	}
 	if alive.IsZero() || time.Since(alive) < 90*time.Second {
 		return // too recent to be a long outage: normal restart, keep counting
 	}
-	if keys := s.timers.PauseRunningAt(alive); len(keys) > 0 {
-		s.recovered = &crashInfo{keys, alive.In(s.cfg.Location()).Format("2006-01-02 15:04")}
+	p := pendingRecovery{Alive: alive.Unix(), Timers: map[string]time.Time{}}
+	for _, t := range s.timers.Snapshot() {
+		if t.RunningSince != nil && t.RunningSince.Before(alive) {
+			p.Timers[t.Key] = *t.RunningSince
+		}
 	}
+	if len(p.Timers) == 0 {
+		return
+	}
+	b, _ := json.Marshal(p)
+	_ = fsutil.WriteAtomicOpts(pendingRecoveryFile(), b, 0o600, false)
+}
+
+// currentRecovery returns the unanswered question, dropping entries whose timers the user has since
+// paused, reset or removed. nil when there is nothing (left) to ask.
+func (s *server) currentRecovery() (*crashInfo, pendingRecovery) {
+	var p pendingRecovery
+	b, err := os.ReadFile(pendingRecoveryFile())
+	if err != nil || json.Unmarshal(b, &p) != nil {
+		return nil, p
+	}
+	keys := []string{}
+	for _, t := range s.timers.Snapshot() {
+		if since, ok := p.Timers[t.Key]; ok && t.RunningSince != nil && t.RunningSince.Equal(since) {
+			keys = append(keys, t.Key)
+		}
+	}
+	if len(keys) == 0 {
+		_ = os.Remove(pendingRecoveryFile())
+		return nil, p
+	}
+	s.mu.RLock()
+	loc := s.cfg.Location()
+	s.mu.RUnlock()
+	return &crashInfo{keys, time.Unix(p.Alive, 0).In(loc).Format("2006-01-02 15:04")}, p
+}
+
+// answerRecovery applies the user's choice: "rewind" pauses the affected timers at the last-alive
+// moment (only those still running from the recorded start); "keep" leaves everything counting.
+func (s *server) answerRecovery(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Action string `json:"action"`
+	}
+	if !decode(r, &req) || (req.Action != "rewind" && req.Action != "keep") {
+		fail(w, 400, "err.badRequest")
+		return
+	}
+	if _, p := s.currentRecovery(); len(p.Timers) > 0 && req.Action == "rewind" {
+		s.timers.RewindTo(p.Timers, time.Unix(p.Alive, 0))
+	}
+	_ = os.Remove(pendingRecoveryFile())
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func newServer() *server {
@@ -124,6 +185,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /api/timers/{key}/comment", s.setComment)
 	mux.HandleFunc("GET /api/update", s.updateStatus)
 	mux.HandleFunc("GET /api/started", s.startedFor)
+	mux.HandleFunc("POST /api/recovery", s.answerRecovery)
 	mux.HandleFunc("GET /api/today", s.today)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
@@ -231,10 +293,9 @@ func reqKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 // ---- session ----
 
 func (s *server) session(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec := s.recovered
-	s.recovered = nil // told once
+	rec, _ := s.currentRecovery() // before taking s.mu: it needs the lock itself
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	writeJSON(w, 200, map[string]any{
 		"recovered":   rec,
 		"loggedIn":    s.client != nil,

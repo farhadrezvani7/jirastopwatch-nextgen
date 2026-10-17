@@ -31,7 +31,7 @@ Download the file for your system from the [**Releases**](https://github.com/far
 
 ### Windows
 1. Download `jirastopwatch-nextgen-windows-amd64-setup.exe` (use `…-arm64-setup.exe` on ARM PCs).
-2. Double-click it → **Next** → **Finish**. You get a Start Menu entry and a desktop shortcut; remove it any time from *Settings → Apps*.
+2. Double-click it → **Next** → **Finish**. You get a Start Menu entry and a desktop shortcut; remove it any time from *Settings → Apps*. To pin it to the taskbar, pin the Start Menu entry (not the open window, which Windows attributes to the browser).
    The first time, SmartScreen may say *“Windows protected your PC”* because the file is not code-signed: click **More info → Run anyway**.
 
 ### macOS
@@ -97,7 +97,7 @@ The original is a C# / WinForms / .NET Framework desktop app for Windows. NextGe
 | **Tests** | NUnit | Go tests, run by CI on **Windows, macOS and Linux** |
 
 ### Everything from the original that is kept
-Multiple stopwatches · time you already logged today (per issue and in total) · *Log & start again* · reorder by drag and drop (press and hold a card) or ▲▼ · pause others when one starts · edit time · remaining-estimate adjustment (auto / leave / set to / reduce by) · post the note as worklog comment, separate comment, or both · move an issue to e.g. *In Progress* when its timer starts · pause on lock · choose what happens on exit · keyboard shortcuts · optional update notice · max. 20 issues · Apache 2.0.
+Multiple stopwatches · reorder with ▲▼ · pause others when one starts · edit time · remaining-estimate adjustment (auto / leave / set to / reduce by) · post the note as worklog comment, separate comment, or both · move an issue to e.g. *In Progress* when its timer starts · pause on lock · choose what happens on exit · keyboard shortcuts · optional update notice · max. 20 issues · Apache 2.0.
 
 ---
 
@@ -113,6 +113,11 @@ Multiple stopwatches · time you already logged today (per issue and in total) �
 - 🔗 **Paste a Jira link** — `Ctrl+V` anywhere adds the issue from a `/browse/ABC-123` or board URL.
 - 🕒 **Jira server-clock aware** — Jira stores the exact moment, but its reports group days by the *server's* time zone. If that differs from yours (and from your Jira profile), the app tells you and lets you opt in to writing your local clock time on the server's clock so reports land on the right day; switch back in Settings any time (the app also offers it once the server's zone is fixed).
 - 🔑 **Stays signed in** — your token is kept in the system credential store and the app signs you in on launch.
+- 📊 **Logged today** — the header shows everything you have logged in Jira today (all issues, in your chosen time zone) and each card shows what you logged on that issue today, so even many worklogs on one ticket add up at a glance.
+- 🔁 **Log & start again** — a button in the log dialog books the worklog and immediately restarts the same issue's timer, no searching needed.
+- ✋ **Drag and drop** — press and hold a card, then drag it to a new place (▲▼ and `Ctrl+↑/↓` still work).
+- 📱 **Responsive & compact** — the layout adapts down to phone-width windows (the issue list becomes a slide-over panel), and slimmer cards fit more timers without scrolling.
+- 🔔 **Tray icon** — on Windows and on Linux desktops with a tray: quick access to the window, running-timer tooltip, pause all, quit (see [Tray icon](#tray-icon)).
 - ⬆️ **One-click updates** — *Check for updates* downloads, verifies and installs the new version for you.
 
 ### Keyboard shortcuts (same as the original)

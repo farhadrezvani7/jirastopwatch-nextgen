@@ -173,3 +173,13 @@ func TestHasWorklogMatchesMineByStartMinuteAndLength(t *testing.T) {
 		}
 	}
 }
+
+func TestIsMineIgnoresCaseOfNamesAndKeys(t *testing.T) {
+	u := &User{Name: "Farhad_Rezvani", Key: "JIRAUSER29505"}
+	if !u.IsMine(Author{Key: "jirauser29505"}) || !u.IsMine(Author{Name: "farhad_rezvani"}) {
+		t.Error("the same user written in another case was not recognised")
+	}
+	if u.IsMine(Author{Key: "JIRAUSER1"}) {
+		t.Error("a different user was taken for me")
+	}
+}

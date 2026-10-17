@@ -89,6 +89,7 @@ Object.assign(STR.en, {
   "warn.recovered": "The app closed unexpectedly (crash or power loss) around {1} while these timers were running: {0}. If the computer was switched off since then, counting up to now would add hours you did not work. Rewind them to {1} (they will be paused there), or keep counting?",
   "recover.title": "Timers were running when the app stopped", "recover.rewind": "Rewind to {0} and pause", "recover.keep": "Keep counting",
   "timer.pin": "Pin to the top", "timer.unpin": "Unpin", "timer.confirmRemovePinned": "This card is pinned. Remove it anyway?",
+  "hdr.pending": "Not logged yet", "hdr.pendingTip": "Time on your timer cards that has not been logged to Jira yet",
   "set.fontSize": "Base font size", "set.shadows": "Show shadows",
   "hdr.today": "Logged today", "hdr.todayTip": "Everything you logged on Jira today, on all issues",
   "timer.today": "Today {0}", "timer.todayTip": "What you logged on this issue today",

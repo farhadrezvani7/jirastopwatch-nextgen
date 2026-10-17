@@ -386,9 +386,9 @@ func (u *User) IsMine(a Author) bool {
 	case u.AccountID != "" && a.AccountID != "":
 		return u.AccountID == a.AccountID
 	case u.Key != "" && a.Key != "":
-		return u.Key == a.Key
+		return strings.EqualFold(u.Key, a.Key) // Jira user names/keys are not case-sensitive
 	case u.Name != "" && a.Name != "":
-		return u.Name == a.Name
+		return strings.EqualFold(u.Name, a.Name)
 	}
 	return u.Email != "" && strings.EqualFold(u.Email, a.Email)
 }

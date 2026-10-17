@@ -84,6 +84,7 @@ header .brand i{width:10px;height:10px;border-radius:50%;background:var(--muted)
 header .brand i.live{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 25%,transparent)}
 .spacer{flex:1}
 .total{color:var(--muted)}.total b{color:var(--text);font-size:calc(var(--fs)*1.1538)}
+#todayBox b{font-size:calc(var(--fs)*1.3077)}
 .iconbtn{box-shadow:var(--sh-1);border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:7px 10px;color:var(--text)}
 .iconbtn:hover{border-color:var(--accent)}
 
@@ -263,7 +264,7 @@ body.aside-closed #app{grid-template-columns:minmax(0,1fr)}
     <div class="spacer"></div>
     <div class="clock mono" id="clock" dir="ltr" style="color:var(--muted)"></div>
     <div class="total" id="todayBox" data-tip="hdr.todayTip"><span data-i18n="hdr.today"></span> <b class="mono" id="todayTotal">–</b></div>
-    <div class="total"><span data-i18n="hdr.total"></span> <b class="mono" id="total">0m</b></div>
+    <div class="total hidden" id="pendingBox" data-tip="hdr.pendingTip"><span data-i18n="hdr.pending"></span> <b class="mono" id="total">0m</b></div>
     <button class="iconbtn themebtn" id="asideBtn" type="button" data-tip="search.ph" aria-label="Issues"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
     <button class="iconbtn themebtn" data-themebtn type="button"></button>
     <button class="iconbtn" id="pauseAll" data-i18n="hdr.pauseAll"></button>
@@ -476,8 +477,13 @@ async function fetchToday() {
     const r = await api("GET", "/api/today");
     todayByKey = r.byKey || {};
     $("#todayTotal").textContent = fmt(r.total);
+    $("#todayBox").title = t("hdr.todayTip");
     renderTimers();
-  } catch {}
+  } catch (ex) {
+    // Could not read today's worklogs from Jira (offline, no permission...): say so instead of a silent dash.
+    $("#todayTotal").textContent = "–";
+    $("#todayBox").title = ex.message;
+  }
 }
 setInterval(fetchToday, 120000);
 window.addEventListener("focus", fetchToday);
@@ -744,6 +750,7 @@ function tick() {
     if (b) b.textContent = fmt(s, true);
   }
   $("#total").textContent = fmt(total);
+  $("#pendingBox").classList.toggle("hidden", total < 60);   // time on the cards that is not in Jira yet
   $("#live").classList.toggle("live", any);
   document.title = any ? "● " + fmt(total) + " — Jira StopWatch NextGen" : "Jira StopWatch NextGen";
 }

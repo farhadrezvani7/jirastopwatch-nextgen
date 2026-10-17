@@ -76,6 +76,7 @@ Object.assign(STR.en, {
   "upd.title": "Update available", "upd.ask": "Version {latest} is available (you have {current}). Replace the current version with the new one and restart now? Running timers keep counting.",
   "upd.now": "Update now", "upd.later": "Not now", "upd.installing": "Downloading and installing…",
   "upd.done": "Updated to {0}. The app is restarting…",
+  "set.fontSize": "Base font size", "set.shadows": "Show shadows",
   "hdr.today": "Logged today", "hdr.todayTip": "Everything you logged on Jira today, on all issues",
   "timer.today": "Today {0}", "timer.todayTip": "What you logged on this issue today",
   "log.restart": "Log & start again",

@@ -32,6 +32,9 @@ type Config struct {
 	TimeMode         string `json:"timeMode,omitempty"`         // "" = send the exact moment (standard) | server = write the local clock time on the Jira server's clock
 	TimeAck          string `json:"timeAck,omitempty"`          // which clock-difference notice the user has already answered
 	StartTransitions string `json:"startTransitions,omitempty"` // status names to move an issue to when its timer starts, one per line
+	Shadows          bool   `json:"shadows,omitempty"`          // draw drop shadows (off by default)
+	FontSize         int    `json:"fontSize,omitempty"`         // base font size in px (10-16); 0 = the default, 13
+	AsideClosed      bool   `json:"asideClosed,omitempty"`      // the issue panel is collapsed (wide windows)
 }
 
 // Location returns the configured time zone, or the system zone.

@@ -119,6 +119,7 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 - 📊 **Logged today** — the header shows everything you have logged in Jira today (all issues, in your chosen time zone) and each card shows what you logged on that issue today, so even many worklogs on one ticket add up at a glance.
 - 🔁 **Log & start again** — a button in the log dialog books the worklog and immediately restarts the same issue's timer, no searching needed.
 - ✋ **Drag and drop** — press and hold a card, then drag it to a new place (▲▼ and `Ctrl+↑/↓` still work).
+- 🎛 **Look, your way** — in *Settings* pick the base font size (10–16 px, previewed live) and switch soft drop shadows on or off (off by default).
 - 👤 **Profile window** — the header shows just a profile icon; click it to see who is signed in, toggle *pause others*, open Settings, check for updates or sign out.
 - 📱 **Responsive & compact** — the layout adapts down to phone-width windows (the issue list becomes a slide-over panel), and slimmer cards and a one-row header fit more without scrolling. The issue panel can be collapsed on wide windows too.
 - 🔔 **Tray icon** — on Windows and on Linux desktops with a tray: quick access to the window, running-timer tooltip, pause all, quit (see [Tray icon](#tray-icon)).

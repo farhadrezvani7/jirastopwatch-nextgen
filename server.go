@@ -250,6 +250,9 @@ func (s *server) prefs() map[string]any {
 		"timezone":         s.cfg.Timezone,
 		"commentMode":      s.cfg.CommentMode,
 		"startTransitions": s.cfg.StartTransitions,
+		"shadows":          s.cfg.Shadows,
+		"fontSize":         s.cfg.FontSize,
+		"asideClosed":      s.cfg.AsideClosed,
 	}
 }
 
@@ -348,6 +351,9 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 		StartTransitions *string `json:"startTransitions"`
 		TimeMode         *string `json:"timeMode"`
 		TimeAck          *string `json:"timeAck"`
+		Shadows          *bool   `json:"shadows"`
+		FontSize         *int    `json:"fontSize"`
+		AsideClosed      *bool   `json:"asideClosed"`
 	}
 	if !decode(r, &req) {
 		fail(w, 400, "err.badRequest")
@@ -358,6 +364,10 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "err.badZone")
 			return
 		}
+	}
+	if req.FontSize != nil && *req.FontSize != 0 && (*req.FontSize < 10 || *req.FontSize > 16) {
+		fail(w, 400, "err.badRequest")
+		return
 	}
 	if req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark" {
 		fail(w, 400, "err.badRequest")
@@ -391,6 +401,15 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Theme != nil {
 		s.cfg.Theme = *req.Theme
+	}
+	if req.Shadows != nil {
+		s.cfg.Shadows = *req.Shadows
+	}
+	if req.FontSize != nil {
+		s.cfg.FontSize = *req.FontSize
+	}
+	if req.AsideClosed != nil {
+		s.cfg.AsideClosed = *req.AsideClosed
 	}
 	if req.LockMode != nil {
 		s.cfg.LockMode = *req.LockMode

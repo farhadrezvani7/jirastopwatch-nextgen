@@ -89,6 +89,15 @@ func TestWorklogUsesChosenTimezoneEstimateAndCommentMode(t *testing.T) {
 	if c, _ := call("POST", "/api/settings", `{"timezone":"Mars/Base"}`); c != 400 {
 		t.Errorf("bad zone accepted: %d", c)
 	}
+	if c, _ := call("POST", "/api/settings", `{"shadows":true,"fontSize":12,"asideClosed":true}`); c != 200 {
+		t.Errorf("look settings rejected: %d", c)
+	}
+	if _, m := call("GET", "/api/session", ""); m["prefs"].(map[string]any)["fontSize"] != float64(12) || m["prefs"].(map[string]any)["shadows"] != true {
+		t.Errorf("look settings not kept: %v", m["prefs"])
+	}
+	if c, _ := call("POST", "/api/settings", `{"fontSize":99}`); c != 400 {
+		t.Errorf("absurd font size accepted: %d", c)
+	}
 	if c, m := call("POST", "/api/timers", `{"key":"abc-1"}`); c != 200 {
 		t.Fatalf("add %d %v", c, m)
 	}

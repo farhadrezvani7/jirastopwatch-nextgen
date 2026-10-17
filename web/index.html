@@ -29,7 +29,7 @@
 :root[data-theme=light]{color-scheme:light}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;-webkit-font-smoothing:antialiased}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 .hidden{display:none!important}
@@ -69,14 +69,6 @@ header .brand i.live{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb
 .total{color:var(--muted)}.total b{color:var(--text);font-size:15px}
 .iconbtn{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:7px 10px;color:var(--text)}
 .iconbtn:hover{border-color:var(--accent)}
-.user{position:relative}
-.menu{position:absolute;inset-inline-end:0;top:110%;min-width:230px;padding:8px;z-index:20}
-.menu .who{padding:8px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
-.menu .who small{display:block;color:var(--muted)}
-.menu hr{border:0;border-top:1px solid var(--line);margin:6px 0}
-.menu button{display:block;width:100%;text-align:start;background:none;border:0;padding:8px 10px;border-radius:8px}
-.menu button:hover{background:var(--panel2)}
-.menu label.check{padding:8px 10px;margin:0}
 
 main{padding:14px 20px;overflow:auto}
 .addrow{display:flex;gap:8px;margin-bottom:10px}
@@ -99,7 +91,7 @@ main{padding:14px 20px;overflow:auto}
 .summary{text-align:start;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
 .pill.today{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok);font-weight:600}
 .proj{color:var(--muted);font-size:12px}
-.time{font-size:22px;font-weight:600;letter-spacing:-.02em;background:none;border:0;padding:2px 6px;border-radius:8px}
+.time{font-size:20px;font-weight:600;letter-spacing:-.02em;background:none;border:0;padding:2px 6px;border-radius:8px}
 .time:hover{background:var(--panel2)}
 .actions{display:flex;gap:6px}
 .actions button{border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:5px 10px;font-weight:600}
@@ -160,27 +152,33 @@ body.dragmode{user-select:none;-webkit-user-select:none;cursor:grabbing}
 .themebtn svg{display:block}
 .themewrap{position:absolute;inset-block-start:16px;inset-inline-end:16px}
 #login{position:relative}
+.modal .foot:empty{display:none}
+.modal .btn.block{margin-top:8px}
+.modal .check{margin:6px 0 12px}
 .modal .foot{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:20px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:var(--text);color:var(--bg);padding:10px 16px;border-radius:12px;box-shadow:var(--shadow);max-width:80vw}
 .toast.bad{background:var(--danger);color:#fff}
 
 /* narrow windows: the issue list becomes a slide-over panel, everything else reflows */
-.asidebtn,.asideclose{display:none}
+body.aside-closed aside{display:none}
+body.aside-closed #app{grid-template-columns:minmax(0,1fr)}
 @media (max-width:820px){
   #app{grid-template-columns:minmax(0,1fr)}
-  header{grid-column:1;flex-wrap:wrap;gap:8px;padding:10px 14px}
-  .spacer{flex-basis:0}
+  header{grid-column:1;gap:6px;padding:8px 12px}
   main{padding:14px}
-  .asidebtn{display:inline-flex}
+  aside,body.aside-closed aside{display:flex}
   aside{position:fixed;inset-block:0;inset-inline-end:0;width:min(360px,100%);z-index:40;box-shadow:var(--shadow);
     transform:translateX(100%);visibility:hidden;transition:transform .2s,visibility .2s}
   [dir=rtl] aside{transform:translateX(-100%)}
   body.aside-open aside{transform:none;visibility:visible}
-  .asideclose{display:block;margin:12px 12px 0;align-self:flex-end}
 }
+@media (max-width:520px){ .brand .bt{display:none} }
+@media (max-width:360px){ #todayBox span{display:none} }
 @media (max-width:600px){
-  .clock,#miniBtn,.total:not(#todayBox){display:none}
+  .clock,.total:not(#todayBox){display:none}
+  #pauseAll{font-size:0;width:38px;height:36px;padding:0}
+  #pauseAll::before{content:"⏸";font-size:18px}
   .login-card{padding:22px 18px}
   .langsel{float:none;width:100%;margin:0 0 12px}
   .themewrap{position:static;float:inline-end;margin-bottom:8px}
@@ -237,27 +235,15 @@ body.dragmode{user-select:none;-webkit-user-select:none;cursor:grabbing}
 
 <div id="app" class="hidden">
   <header>
-    <div class="brand"><i id="live"></i> Jira StopWatch NextGen</div>
+    <div class="brand"><i id="live"></i> <span class="bt">Jira StopWatch NextGen</span></div>
     <div class="spacer"></div>
     <div class="clock mono" id="clock" dir="ltr" style="color:var(--muted)"></div>
     <div class="total" id="todayBox" data-tip="hdr.todayTip"><span data-i18n="hdr.today"></span> <b class="mono" id="todayTotal">–</b></div>
     <div class="total"><span data-i18n="hdr.total"></span> <b class="mono" id="total">0m</b></div>
-    <button class="iconbtn asidebtn themebtn" id="asideBtn" type="button" data-tip="tab.recent" aria-label="Issues"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-    <button class="iconbtn hidden" id="miniBtn" type="button" data-tip="mini.tip">⧉</button>
+    <button class="iconbtn themebtn" id="asideBtn" type="button" data-tip="search.ph" aria-label="Issues"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
     <button class="iconbtn themebtn" data-themebtn type="button"></button>
     <button class="iconbtn" id="pauseAll" data-i18n="hdr.pauseAll"></button>
-    <button class="iconbtn themebtn" id="signOutBtn" type="button" data-tip="menu.signOut" aria-label="Sign out"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>
-    <div class="user">
-      <button class="iconbtn" id="userBtn"></button>
-      <div class="menu card hidden" id="menu">
-        <div class="who"><b id="mName"></b><small id="mSite"></small></div>
-        <label class="check"><input type="checkbox" id="optPause"> <span data-i18n="set.pauseOthers"></span></label>
-        <button id="openSettings" data-i18n="menu.settings"></button>
-        <button id="checkUpdate" class="hidden" data-i18n="menu.update"></button>
-        <hr>
-        <button id="signOut" data-i18n="menu.signOut"></button>
-      </div>
-    </div>
+    <button class="iconbtn themebtn" id="userBtn" type="button" aria-label="Profile"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></button>
   </header>
 
   <main>
@@ -271,13 +257,12 @@ body.dragmode{user-select:none;-webkit-user-select:none;cursor:grabbing}
   </main>
 
   <aside>
-    <button class="iconbtn asideclose" id="asideClose" type="button" aria-label="Close">✕</button>
     <div class="tabs" id="tabs">
       <button data-src="recent" class="on" data-i18n="tab.recent"></button>
       <button data-src="assigned" data-i18n="tab.assigned"></button>
       <button data-src="filter" data-i18n="tab.filters"></button>
     </div>
-    <div class="search" style="display:flex;gap:8px"><input id="q" type="text" data-ph="search.ph" autocomplete="off"><button class="iconbtn" id="reload" type="button" data-tip="reload.tip">⟳</button></div>
+    <div class="search" style="display:flex;gap:8px"><input id="q" type="text" data-ph="search.ph" autocomplete="off"><button class="iconbtn" id="reload" type="button" data-tip="reload.tip">⟳</button><button class="iconbtn" id="asideClose" type="button" aria-label="Close">✕</button></div>
     <div class="filterbar hidden" id="filterbar"></div>
     <div class="list" id="list"></div>
   </aside>
@@ -528,11 +513,7 @@ async function enterApp(user, sess) {
   me = user; site = sess.site; pauseOthers = sess.pauseOthers; prefs = sess.prefs; clock = sess.time;
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  $("#userBtn").textContent = user.displayName + " ▾";
-  $("#mName").textContent = user.displayName;
-  $("#mSite").textContent = site.replace(/^https?:\/\//, "");
-  $("#optPause").checked = pauseOthers;
-  $("#checkUpdate").classList.toggle("hidden", !prefs.updateEnabled);
+  $("#userBtn").title = user.displayName;
   await applyI18n();
   await refresh();
   fetchToday();
@@ -541,17 +522,24 @@ async function enterApp(user, sess) {
   setTimeout(checkUpdateBanner, 4000);
 }
 
-/* ---------- header menu ---------- */
-$("#userBtn").onclick = e => { e.stopPropagation(); $("#menu").classList.toggle("hidden"); };
-document.addEventListener("click", e => { if (!e.target.closest("#menu")) $("#menu").classList.add("hidden"); });
+/* ---------- profile ---------- */
 async function signOut() {
   await api("POST", "/api/logout");
   showLogin(await api("GET", "/api/session"));
 }
-$("#signOut").onclick = $("#signOutBtn").onclick = signOut;
-$("#optPause").onchange = e => api("POST", "/api/settings", {pauseOthers: e.target.checked}).then(() => pauseOthers = e.target.checked);
 $("#pauseAll").onclick = async () => { await api("POST", "/api/timers/pause-all"); refresh(); };
-$("#openSettings").onclick = () => { $("#menu").classList.add("hidden"); settingsDialog(); };
+$("#userBtn").onclick = () => {
+  const cb = el("input", {type: "checkbox", checked: pauseOthers});
+  cb.onchange = () => api("POST", "/api/settings", {pauseOthers: cb.checked}).then(() => pauseOthers = cb.checked);
+  const row = (text, onclick, cls = "btn ghost") => el("button", {type: "button", className: cls + " block", textContent: text, onclick});
+  let close;
+  const body = el("div", {},
+    el("label", {className: "check"}, cb, el("span", {textContent: t("set.pauseOthers")})),
+    row(t("menu.settings"), () => { close(); settingsDialog(); }),
+    ...(prefs.updateEnabled ? [row(t("menu.update"), () => { close(); updateFlow(); })] : []),
+    row(t("menu.signOut"), () => { close(); signOut(); }));
+  ({close} = modal(me.displayName, [me.emailAddress, site.replace(/^https?:\/\//, "")].filter(Boolean).join(" · "), body, () => []));
+};
 
 /* ---------- timers ---------- */
 const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
@@ -678,7 +666,6 @@ function tick() {
     if (b) b.textContent = fmt(s, true);
   }
   $("#total").textContent = fmt(total);
-  renderMini();
   $("#live").classList.toggle("live", any);
   document.title = any ? "● " + fmt(total) + " — Jira StopWatch NextGen" : "Jira StopWatch NextGen";
 }
@@ -983,51 +970,13 @@ document.addEventListener("paste", e => {
   if (text) { e.preventDefault(); addIssue(text.slice(0, 500)); }
 });
 
-/* ---------- mini window: Document Picture-in-Picture is an always-on-top window (Chrome/Edge 116+) ---------- */
-let mini = null;
-$("#asideBtn").onclick = () => document.body.classList.toggle("aside-open");
-$("#asideClose").onclick = () => document.body.classList.remove("aside-open");
+/* ---------- issue panel: a slide-over on narrow windows, collapsible on wide ones ---------- */
+const narrow = matchMedia("(max-width:820px)");
+try { if (localStorage.getItem("asideClosed") === "1") document.body.classList.add("aside-closed"); } catch {}
+const saveAside = () => { try { localStorage.setItem("asideClosed", document.body.classList.contains("aside-closed") ? "1" : "0"); } catch {} };
+$("#asideBtn").onclick = () => { document.body.classList.toggle(narrow.matches ? "aside-open" : "aside-closed"); saveAside(); };
+$("#asideClose").onclick = () => { document.body.classList.remove("aside-open"); if (!narrow.matches) document.body.classList.add("aside-closed"); saveAside(); };
 document.addEventListener("keydown", e => { if (e.key === "Escape") document.body.classList.remove("aside-open"); });
-if ("documentPictureInPicture" in window) $("#miniBtn").classList.remove("hidden");
-$("#miniBtn").onclick = async () => {
-  if (mini) { mini.close(); return; }
-  try {
-    mini = await documentPictureInPicture.requestWindow({width: 340, height: 220});
-  } catch { return; }
-  for (const st of document.querySelectorAll("style")) mini.document.head.append(st.cloneNode(true));
-  mini.document.documentElement.dir = document.documentElement.dir;
-  mini.document.documentElement.lang = lang;
-  mini.document.body.className = "mini";
-  mini.addEventListener("pagehide", () => { mini = null; miniSig = ""; });
-  miniSig = "";
-  renderMini();
-};
-let miniSig = "";
-function renderMini() {
-  if (!mini) return;
-  const sig = [document.documentElement.dataset.theme, lang, ...timers.map(x => x.key + x.running + x.summary + x.status)].join("|");
-  if (sig === miniSig) {   // same layout: just refresh the clocks so buttons aren't rebuilt under the pointer
-    for (const sp of mini.document.querySelectorAll("[data-t]")) { const x = timers.find(y => y.key === sp.dataset.t); if (x) sp.textContent = fmt(elapsed(x), true); }
-    const tot = mini.document.querySelector(".total"); if (tot) tot.textContent = fmt(timers.reduce((a, x) => a + elapsed(x), 0));
-    return;
-  }
-  miniSig = sig;
-  const d = mini.document, th = document.documentElement.dataset.theme;
-  if (th) d.documentElement.dataset.theme = th; else delete d.documentElement.dataset.theme;
-  const rows = [...timers].sort((a, b) => b.running - a.running).slice(0, 8).map(x => {
-    const b = el("button", {className: "play", textContent: x.running ? "⏸" : "▶", title: t(x.running ? "timer.pause" : "timer.start")});
-    b.style.cssText = "width:30px;height:30px;font-size:13px;flex:none";
-    b.onclick = () => act(`/api/timers/${x.key}/${x.running ? "pause" : "start"}`);
-    const k = el("div", {style: "min-width:0;flex:1"}, el("b", {textContent: x.key, dir: "ltr", style: "color:var(--link)"}),
-      el("div", {className: "proj", textContent: x.summary, dir: "auto", style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis"}));
-    const tm = el("span", {className: "mono", textContent: fmt(elapsed(x), true), dir: "ltr", style: "font-weight:600"});
-    tm.dataset.t = x.key;
-    return el("div", {style: "display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--line)"}, b, k, tm);
-  });
-  const total = timers.reduce((a, x) => a + elapsed(x), 0);
-  d.body.replaceChildren(el("div", {style: "padding:8px 10px"},
-    el("div", {style: "display:flex;justify-content:space-between;margin-bottom:4px"}, el("b", {textContent: "Jira StopWatch NextGen"}), el("span", {className: "total", textContent: fmt(total)})), ...rows));
-}
 
 /* ---------- update notice (only when the build knows its release repo) ---------- */
 async function checkUpdateBanner() {
@@ -1066,7 +1015,6 @@ function clockNotice() {
 
 /* ---------- install updates ---------- */
 async function updateFlow() {
-  $("#menu").classList.add("hidden");
   toast(t("upd.checking"));
   let u;
   try { u = await api("POST", "/api/update/check"); } catch (ex) { toast(ex.message, true); return; }
@@ -1091,7 +1039,6 @@ async function updateFlow() {
     }
   };
 }
-$("#checkUpdate").onclick = updateFlow;
 $("#updlink").onclick = e => { e.preventDefault(); updateFlow(); };
 
 /* ---------- boot ---------- */

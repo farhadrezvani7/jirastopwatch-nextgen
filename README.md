@@ -56,7 +56,7 @@ Download the file for your system from the [**Releases**](https://github.com/far
 > No Chromium-based browser? The app opens in your default browser instead and quits when you close the tab.
 
 ### Updating
-Open the menu under your name → **Check for updates**. If a newer release exists, confirm and the app downloads it, verifies its checksum, replaces itself and restarts, with no uninstalling and no manual download. Running timers keep counting. Copies installed system-wide (e.g. from a `.deb`/`.rpm` in `/usr/bin`) ask for your administrator password (polkit/`pkexec`) to replace the file; if `pkexec` isn't available the dialog links to the download page instead.
+Click the profile icon (top right) → **Check for updates**. If a newer release exists, confirm and the app downloads it, verifies its checksum, replaces itself and restarts, with no uninstalling and no manual download. Running timers keep counting. Copies installed system-wide (e.g. from a `.deb`/`.rpm` in `/usr/bin`) ask for your administrator password (polkit/`pkexec`) to replace the file; if `pkexec` isn't available the dialog links to the download page instead.
 
 ### Build from source (any OS)
 ```bash
@@ -89,7 +89,7 @@ The original is a C# / WinForms / .NET Framework desktop app for Windows. NextGe
 | **Technology** | C#, WinForms, .NET Framework, RestSharp | **Go**, one self-contained binary, embedded web UI |
 | **Install** | MSI installer + .NET runtime | **Download one file and run it** — no installer, no runtime |
 | **Footprint** *(measured on Linux)* | — | ~6.5 MB binary · server ready in ~40 ms · ~10 MB RAM for the server process (the browser window is extra) |
-| **Interface** | WinForms window | **Redesigned** modern UI with **light & dark themes**, live clock, mini window |
+| **Interface** | WinForms window | **Redesigned** modern UI with **light & dark themes**, live clock |
 | **Languages** | English | **41 languages**, searchable, with full **right-to-left** layout (Persian, Arabic, Urdu, Hebrew, Kurdish, Pashto) |
 | **Time zone** | Computer's local time | **Pick a country (all 247) → worklogs use its time zone** — no more manual +3:30 maths |
 | **Sign-in** | Username + API token | **Cloud** (email + API token), **Server/DC personal access token**, or username + password |
@@ -112,7 +112,6 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 - 🗣 **41 languages** — English, فارسی, العربية, اردو, کوردی, پښتو, עברית, Türkçe, Azərbaycanca, Русский, Українська, Español, Português, Français, Deutsch, Italiano, Nederlands, Polski, Čeština, Slovenčina, Română, Ελληνικά, Magyar, Български, Српски, Hrvatski, Svenska, Dansk, Suomi, Norsk, 中文, 日本語, 한국어, हिन्दी, বাংলা, தமிழ், Bahasa Indonesia, Bahasa Melayu, ไทย, Tiếng Việt, Kiswahili. Choosing a country suggests its main language.
 - 🎨 **Light & dark themes** — switch from the header, the sign-in page or Settings; *Auto* follows your OS.
 - 🔎 **Search where you need it** — language, country and zone pickers (accent-insensitive; countries match English, localized and native names), your favourite Jira filters, your timer list, and Jira issues.
-- 🪟 **Mini window** — a small always-on-top floating timer with play/pause (Chrome/Edge 116+).
 - 🔒 **Pause on lock** — pause running timers when the computer locks and optionally resume on unlock (Linux with systemd-logind, Windows, macOS).
 - 🔗 **Paste a Jira link** — `Ctrl+V` anywhere adds the issue from a `/browse/ABC-123` or board URL.
 - 🕒 **Jira server-clock aware** — Jira stores the exact moment, but its reports group days by the *server's* time zone. If that differs from yours (and from your Jira profile), the app tells you and lets you opt in to writing your local clock time on the server's clock so reports land on the right day; switch back in Settings any time (the app also offers it once the server's zone is fixed).
@@ -120,7 +119,8 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 - 📊 **Logged today** — the header shows everything you have logged in Jira today (all issues, in your chosen time zone) and each card shows what you logged on that issue today, so even many worklogs on one ticket add up at a glance.
 - 🔁 **Log & start again** — a button in the log dialog books the worklog and immediately restarts the same issue's timer, no searching needed.
 - ✋ **Drag and drop** — press and hold a card, then drag it to a new place (▲▼ and `Ctrl+↑/↓` still work).
-- 📱 **Responsive & compact** — the layout adapts down to phone-width windows (the issue list becomes a slide-over panel), and slimmer cards fit more timers without scrolling.
+- 👤 **Profile window** — the header shows just a profile icon; click it to see who is signed in, toggle *pause others*, open Settings, check for updates or sign out.
+- 📱 **Responsive & compact** — the layout adapts down to phone-width windows (the issue list becomes a slide-over panel), and slimmer cards and a one-row header fit more without scrolling. The issue panel can be collapsed on wide windows too.
 - 🔔 **Tray icon** — on Windows and on Linux desktops with a tray: quick access to the window, running-timer tooltip, pause all, quit (see [Tray icon](#tray-icon)).
 - ⬆️ **One-click updates** — *Check for updates* downloads, verifies and installs the new version for you.
 

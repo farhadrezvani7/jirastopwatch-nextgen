@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -139,5 +140,33 @@ func TestUpdateEndpointsRestartOnlyWhenNewer(t *testing.T) {
 	}
 	if s.restartTarget() != "" {
 		t.Error("restart was scheduled although there is no update")
+	}
+}
+
+func TestUpdateRefusedWhileTimersRun(t *testing.T) {
+	s := newTestServer(t)
+	fakeGitHub(t, "v2.0.0", []byte("x"), "") // newer than the running 1.0.0
+	_ = s.timers.Add("ABC-1", "s", "p", "st")
+	_ = s.timers.Start("ABC-1", false)
+	do := func(path string) (int, string) {
+		req := httptest.NewRequest("POST", path, nil)
+		req.Host = "127.0.0.1"
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, req)
+		return w.Code, w.Body.String()
+	}
+	if c, body := do("/api/update/check"); c != 200 || !strings.Contains(body, `"running":["ABC-1"]`) {
+		t.Errorf("check: %d %s", c, body)
+	}
+	if c, body := do("/api/update/apply"); c != 409 || !strings.Contains(body, "err.updRunning") {
+		t.Errorf("apply with a running timer: %d %s", c, body)
+	}
+	if s.restartTarget() != "" {
+		t.Error("restart scheduled while a timer is running")
+	}
+	s.timers.PauseAll()
+	if c, body := do("/api/update/apply"); c == 409 && strings.Contains(body, "err.updRunning") {
+		t.Errorf("still refused after pausing: %s", body)
 	}
 }

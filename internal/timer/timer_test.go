@@ -1,6 +1,7 @@
 package timer
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -105,5 +106,56 @@ func TestMoveAndLimit(t *testing.T) {
 	}
 	if err := m.Add("C-3", "new", "", ""); err != nil { // refreshing an existing one is always fine
 		t.Errorf("refresh at limit: %v", err)
+	}
+}
+
+func TestLoadSurvivesDamagedFile(t *testing.T) {
+	path := t.TempDir() + "/timers.json"
+	m := Load(path)
+	m.Add("A-1", "a", "p", "s")
+	m.Add("B-2", "b", "p", "s")                                              // the second save keeps the first as the backup
+	if err := os.WriteFile(path, []byte(`[{"key":"B-`), 0o600); err != nil { // power cut mid-write
+		t.Fatal(err)
+	}
+	got := Load(path)
+	if _, ok := got.Get("A-1"); !ok {
+		t.Errorf("the timer from the last good copy was lost: %+v", got.Snapshot())
+	}
+	got.Add("C-3", "c", "p", "s") // and the app keeps working and saving afterwards
+	if _, ok := Load(path).Get("C-3"); !ok {
+		t.Error("saving after recovery failed")
+	}
+}
+
+func TestClockSetBackNeverEatsBankedTime(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	m := &Manager{Now: func() time.Time { return now }}
+	m.Add("A-1", "", "", "")
+	m.SetElapsed("A-1", 20*time.Minute)
+	m.Start("A-1", false)
+	now = now.Add(-3 * time.Hour) // the computer's clock jumps back
+	a, _ := m.Get("A-1")
+	if got := a.Elapsed(now); got != 20*time.Minute {
+		t.Errorf("elapsed after the clock moved back = %v, want the banked 20m", got)
+	}
+	m.Pause("A-1")
+	if a, _ = m.Get("A-1"); a.Accumulated != 20*time.Minute {
+		t.Errorf("banked time changed on pause: %v", a.Accumulated)
+	}
+}
+
+func TestSaveErrorIsReported(t *testing.T) {
+	dir := t.TempDir()
+	blocker := dir + "/file"
+	os.WriteFile(blocker, []byte("x"), 0o600)
+	m := Load(blocker + "/sub/timers.json") // the parent "folder" is a file: writing must fail
+	m.Add("A-1", "", "", "")
+	if m.SaveError() == "" {
+		t.Error("a failed save went unnoticed")
+	}
+	m2 := Load(dir + "/ok/timers.json")
+	m2.Add("A-1", "", "", "")
+	if m2.SaveError() != "" {
+		t.Errorf("unexpected save error: %v", m2.SaveError())
 	}
 }

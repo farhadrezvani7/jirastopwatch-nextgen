@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"jirastopwatch-nextgen/internal/fsutil"
 	"jirastopwatch-nextgen/internal/secret"
 
 	_ "time/tzdata" // Windows has no system zoneinfo; embed it so named zones always load
@@ -32,8 +33,10 @@ type Config struct {
 	TimeMode         string `json:"timeMode,omitempty"`         // "" = send the exact moment (standard) | server = write the local clock time on the Jira server's clock
 	TimeAck          string `json:"timeAck,omitempty"`          // which clock-difference notice the user has already answered
 	StartTransitions string `json:"startTransitions,omitempty"` // status names to move an issue to when its timer starts, one per line
+	StartOnTop       bool   `json:"startOnTop,omitempty"`       // a timer that starts moves to the top of the list
 	Shadows          bool   `json:"shadows,omitempty"`          // draw drop shadows (off by default)
 	FontSize         int    `json:"fontSize,omitempty"`         // base font size in px (10-16); 0 = the default, 13
+	LastJQL          string `json:"lastJql,omitempty"`          // the last advanced (JQL) search, offered again next time
 	AsideClosed      bool   `json:"asideClosed,omitempty"`      // the issue panel is collapsed (wide windows)
 }
 
@@ -65,9 +68,9 @@ var keychain struct {
 
 func Load() Config {
 	c := Config{PauseOthers: true}
-	if b, err := os.ReadFile(filepath.Join(Dir(), "config.json")); err == nil {
-		_ = json.Unmarshal(b, &c)
-	}
+	// The config may hold a fallback token: no backup copies of it are kept (see write).
+	_, _ = fsutil.ReadJSONOpts(filepath.Join(Dir(), "config.json"), &c, false)
+	_ = os.Remove(filepath.Join(Dir(), "config.json.bak")) // left by an earlier build that kept one
 	keychain.mu.Lock()
 	defer keychain.mu.Unlock()
 	if c.Token == "" {
@@ -111,14 +114,6 @@ func Save(c Config) error {
 }
 
 func write(c Config) error {
-	if err := os.MkdirAll(Dir(), 0o700); err != nil {
-		return err
-	}
 	b, _ := json.MarshalIndent(c, "", " ")
-	p := filepath.Join(Dir(), "config.json")
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
+	return fsutil.WriteAtomicOpts(filepath.Join(Dir(), "config.json"), b, 0o600, false) // durable, but no stale copy of a token
 }

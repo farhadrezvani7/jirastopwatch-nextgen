@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jirastopwatch-nextgen/internal/jira"
@@ -25,6 +26,8 @@ import (
 var webFS embed.FS
 
 const localLayout = "2006-01-02T15:04"
+
+const maxJQL = 2000 // longest advanced search we accept
 
 var keyRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*-\d+$`)
 
@@ -42,8 +45,10 @@ type server struct {
 	timers *timer.Manager
 
 	todayMu   sync.Mutex
-	todayAt   time.Time // when todayData was fetched
-	todayDay  string    // the date it is for
+	todayGen  atomic.Int64 // bumped whenever the day's totals may have changed (never blocks)
+	todayFor  int64        // the generation todayData belongs to
+	todayAt   time.Time    // when todayData was fetched
+	todayDay  string       // the date it is for
 	todayData map[string]any
 
 	lockPaused []string // timers paused by a session lock, for "resume on unlock"
@@ -53,8 +58,27 @@ type server struct {
 	restartExe string // set once an update is installed: main starts this after shutting down
 	quit       func() // asks main to shut down (set by main)
 
+	recovered *crashInfo // set at start-up after an unclean end; shown to the user once
+
 	pingMu   sync.Mutex
 	lastPing time.Time
+}
+
+type crashInfo struct {
+	Keys []string `json:"keys"`
+	At   string   `json:"at"` // when the app was last running, local time
+}
+
+// recoverFromCrash runs when the previous copy never exited cleanly. Timers that were running
+// are paused at the moment the app was last seen alive, rather than counting the time the computer
+// was off (the page tells the user, who can correct the time).
+func (s *server) recoverFromCrash(alive time.Time) {
+	if alive.IsZero() || time.Since(alive) < 90*time.Second {
+		return // too recent to be a long outage: normal restart, keep counting
+	}
+	if keys := s.timers.PauseRunningAt(alive); len(keys) > 0 {
+		s.recovered = &crashInfo{keys, alive.In(s.cfg.Location()).Format("2006-01-02 15:04")}
+	}
 }
 
 func newServer() *server {
@@ -207,9 +231,12 @@ func reqKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 // ---- session ----
 
 func (s *server) session(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec := s.recovered
+	s.recovered = nil // told once
 	writeJSON(w, 200, map[string]any{
+		"recovered":   rec,
 		"loggedIn":    s.client != nil,
 		"user":        s.user,
 		"site":        s.cfg.Site,
@@ -250,9 +277,11 @@ func (s *server) prefs() map[string]any {
 		"timezone":         s.cfg.Timezone,
 		"commentMode":      s.cfg.CommentMode,
 		"startTransitions": s.cfg.StartTransitions,
+		"startOnTop":       s.cfg.StartOnTop,
 		"shadows":          s.cfg.Shadows,
 		"fontSize":         s.cfg.FontSize,
 		"asideClosed":      s.cfg.AsideClosed,
+		"lastJql":          s.cfg.LastJQL,
 	}
 }
 
@@ -309,9 +338,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.client, s.user, s.hoursPerDay = c, user, hpd
-	s.todayMu.Lock()
-	s.todayAt = time.Time{}
-	s.todayMu.Unlock()
+	s.todayGen.Add(1)
 	s.serverOff, s.serverKnown = srvOff, srvKnown
 	s.cfg.Site, s.cfg.Mode, s.cfg.Email, s.cfg.Token = site, req.Mode, req.Email, ""
 	if req.Remember {
@@ -351,9 +378,11 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 		StartTransitions *string `json:"startTransitions"`
 		TimeMode         *string `json:"timeMode"`
 		TimeAck          *string `json:"timeAck"`
+		StartOnTop       *bool   `json:"startOnTop"`
 		Shadows          *bool   `json:"shadows"`
 		FontSize         *int    `json:"fontSize"`
 		AsideClosed      *bool   `json:"asideClosed"`
+		LastJQL          *string `json:"lastJql"`
 	}
 	if !decode(r, &req) {
 		fail(w, 400, "err.badRequest")
@@ -364,6 +393,10 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "err.badZone")
 			return
 		}
+	}
+	if req.LastJQL != nil && len(*req.LastJQL) > maxJQL {
+		fail(w, 400, "err.badRequest")
+		return
 	}
 	if req.FontSize != nil && *req.FontSize != 0 && (*req.FontSize < 10 || *req.FontSize > 16) {
 		fail(w, 400, "err.badRequest")
@@ -402,6 +435,9 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	if req.Theme != nil {
 		s.cfg.Theme = *req.Theme
 	}
+	if req.StartOnTop != nil {
+		s.cfg.StartOnTop = *req.StartOnTop
+	}
 	if req.Shadows != nil {
 		s.cfg.Shadows = *req.Shadows
 	}
@@ -410,6 +446,9 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AsideClosed != nil {
 		s.cfg.AsideClosed = *req.AsideClosed
+	}
+	if req.LastJQL != nil {
+		s.cfg.LastJQL = strings.TrimSpace(*req.LastJQL)
 	}
 	if req.LockMode != nil {
 		s.cfg.LockMode = *req.LockMode
@@ -478,7 +517,7 @@ func (s *server) state(w http.ResponseWriter, r *http.Request) {
 			int64(t.Elapsed(now).Seconds()), t.Running(), t.Comment, defaultStart(now, t.Elapsed(now)).In(loc).Format(localLayout)}
 	}
 	_, off := now.In(loc).Zone()
-	writeJSON(w, 200, map[string]any{"timers": out, "pauseOthers": po,
+	writeJSON(w, 200, map[string]any{"timers": out, "pauseOthers": po, "saveError": s.timers.SaveError(),
 		"zone": map[string]any{"name": loc.String(), "offsetSec": off, "nowUnix": now.Unix()}})
 }
 
@@ -541,11 +580,14 @@ func (s *server) startTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.RLock()
-	po, c, names := s.cfg.PauseOthers, s.client, s.cfg.StartTransitions
+	po, c, names, top := s.cfg.PauseOthers, s.client, s.cfg.StartTransitions, s.cfg.StartOnTop
 	s.mu.RUnlock()
 	if err := s.timers.Start(key, po); err != nil {
 		fail(w, 404, err.Error())
 		return
+	}
+	if top {
+		_ = s.timers.MoveAfter(key, "") // "Move to the top when started" (Settings)
 	}
 	if c != nil && strings.TrimSpace(names) != "" {
 		go applyStartTransition(c, key, names)
@@ -655,29 +697,44 @@ func (s *server) logWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	comment := strings.TrimSpace(req.Comment)
-	wlComment := comment
+	wlComment, sepComment := comment, ""
 	if comment != "" && (mode == "comment" || mode == "both") {
-		if err := c.PostComment(r.Context(), key, comment); err != nil {
-			failErr(w, err)
-			return
-		}
+		sepComment = comment
 		if mode == "comment" {
 			wlComment = ""
 		}
 	}
-	if err := c.PostWorklog(r.Context(), key, started, d, wlComment, est); err != nil {
+	resp := map[string]any{"ok": true}
+	// If an earlier attempt was cut off by the network after Jira had already saved it, retrying must
+	// not book the same time twice: an identical entry of yours (same start minute and length) counts as done.
+	s.mu.RLock()
+	me := s.user
+	s.mu.RUnlock()
+	already, _ := c.HasWorklog(r.Context(), me, key, started, d)
+	if already {
+		resp["warning"] = "warn.alreadyLogged|" + key
+	} else if err := c.PostWorklog(r.Context(), key, started, d, wlComment, est); err != nil {
 		failErr(w, err)
 		return
 	}
-	s.todayMu.Lock()
-	s.todayAt = time.Time{} // totals are stale now
-	s.todayMu.Unlock()
-	// The worklog is saved; reset now so a failed transition can't cause double logging.
+	// The worklog is saved: reset right away (before anything that can fail or stall) so the same
+	// time can never be logged again, and the day's totals are stale.
 	s.timers.Reset(key)
-	resp := map[string]any{"ok": true}
+	s.todayGen.Add(1)
+	// The separate comment goes after the worklog, so a failure here can't lose time or duplicate a comment on retry.
+	if sepComment != "" && !already {
+		if err := c.PostComment(r.Context(), key, sepComment); err != nil {
+			resp["warning"] = "warn.comment|" + err.Error()
+			_ = s.timers.SetComment(key, sepComment) // keep the text as the timer's draft so it is not lost
+		}
+	}
 	if req.Transition != "" {
 		if err := c.DoTransition(r.Context(), key, req.Transition); err != nil {
-			resp["warning"] = "warn.transition|" + err.Error()
+			if resp["warning"] == nil {
+				resp["warning"] = "warn.transition|" + err.Error()
+			} else {
+				resp["warning2"] = "warn.transition|" + err.Error()
+			}
 		}
 	}
 	writeJSON(w, 200, resp)
@@ -704,10 +761,22 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jql = "filter = " + id
+	case "all":
+		// Every issue the user may see, any team: optionally narrowed by their own JQL, which Jira runs as
+		// them (permissions apply, syntax errors come back in Jira's words). Cloud refuses a query that
+		// has only ORDER BY, so the default carries a harmless date bound.
+		jql = strings.TrimSpace(q.Get("jql"))
+		if len(jql) > maxJQL {
+			fail(w, 400, "err.badRequest")
+			return
+		}
+		if jql == "" {
+			jql = `created >= "2000-01-01" ORDER BY updated DESC`
+		}
 	case "search":
 		text := strings.TrimSpace(q.Get("q"))
 		if text == "" {
-			writeJSON(w, 200, []jira.Issue{})
+			writeJSON(w, 200, map[string]any{"issues": []jira.Issue{}, "next": ""})
 			return
 		}
 		esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(text)
@@ -720,7 +789,7 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "err.badSource")
 		return
 	}
-	res, err := c.Search(r.Context(), jql, 50)
+	res, next, err := c.SearchPage(r.Context(), jql, 50, q.Get("cursor"))
 	if err != nil {
 		failErr(w, err)
 		return
@@ -728,7 +797,7 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 	if res == nil {
 		res = []jira.Issue{}
 	}
-	writeJSON(w, 200, res)
+	writeJSON(w, 200, map[string]any{"issues": res, "next": next})
 }
 
 func (s *server) filters(w http.ResponseWriter, r *http.Request) {
@@ -993,16 +1062,24 @@ func (s *server) today(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.RLock()
 	loc, me := s.cfg.Location(), s.user
+	srvClock, srvOff := s.cfg.TimeMode == timeServer && s.serverKnown, s.serverOff
 	s.mu.RUnlock()
 	now := time.Now().In(loc)
 	day := now.Format("2006-01-02")
+	// In "match the server clock" mode worklogs carry the local wall time on the server's clock,
+	// so "today" is that same calendar day measured in the server's zone.
+	dayLoc := loc
+	if srvClock {
+		dayLoc = time.FixedZone("jira-server", srvOff)
+	}
 	s.todayMu.Lock()
 	defer s.todayMu.Unlock()
-	if s.todayDay == day && time.Since(s.todayAt) < 20*time.Second && s.todayData != nil {
+	gen := s.todayGen.Load()
+	if s.todayDay == day && s.todayFor == gen && time.Since(s.todayAt) < 20*time.Second && s.todayData != nil {
 		writeJSON(w, 200, s.todayData)
 		return
 	}
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, dayLoc)
 	logs, err := c.WorklogsSince(r.Context(), me, start)
 	if err != nil {
 		failErr(w, err)
@@ -1018,6 +1095,6 @@ func (s *server) today(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.todayData = map[string]any{"total": total, "byKey": by, "date": day}
-	s.todayDay, s.todayAt = day, time.Now()
+	s.todayDay, s.todayAt, s.todayFor = day, time.Now(), gen
 	writeJSON(w, 200, s.todayData)
 }

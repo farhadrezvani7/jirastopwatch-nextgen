@@ -176,7 +176,9 @@ func downloadUpdate(ctx context.Context, tag, exe string) (string, error) {
 func swapBinary(newPath, exe string) error {
 	if !writable(filepath.Dir(exe)) && canElevate() {
 		defer os.RemoveAll(filepath.Dir(newPath))
-		if out, err := exec.Command("pkexec", "install", "-m", "0755", newPath, exe).CombinedOutput(); err != nil {
+		// Copy next to the target first, then rename over it: a power cut mid-copy must never leave a truncated binary.
+		script := `install -m 0755 "$1" "$2.new" && mv -f "$2.new" "$2" || { rm -f "$2.new"; exit 1; }`
+		if out, err := exec.Command("pkexec", "sh", "-c", script, "sh", newPath, exe).CombinedOutput(); err != nil {
 			return fmt.Errorf("could not install with administrator rights: %v %s", err, strings.TrimSpace(string(out)))
 		}
 		return nil
@@ -208,7 +210,17 @@ var canElevate = func() bool {
 
 // removeOldBinary deletes the file a previous Windows update left behind.
 func removeOldBinary() {
-	if exe, err := exePath(); err == nil {
-		_ = os.Remove(exe + ".old")
+	exe, err := exePath()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(exe + ".old")
+	// A download cut short by a power failure or crash leaves ".update-*" files next to the binary.
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), ".update-*")); len(left) > 0 {
+		for _, f := range left {
+			if st, err := os.Stat(f); err == nil && time.Since(st.ModTime()) > 10*time.Minute {
+				_ = os.Remove(f)
+			}
+		}
 	}
 }

@@ -46,13 +46,34 @@ func main() {
 		return
 	}
 
+	if !acquireLock() { // already running: show that copy instead of starting a second one
+		u := waitForInstance(6 * time.Second)
+		switch {
+		case u == "":
+			fmt.Println("Jira StopWatch NextGen is already running.")
+		case *noOpen:
+			fmt.Println(u)
+		default:
+			if cmd := appWindow(u); cmd == nil && !openDefaultBrowser(u) {
+				fmt.Println("Already running. Open this in a browser:\n" + u)
+			}
+		}
+		return
+	}
+	crashed := previousRunEndedBadly()
 	s := newServer()
+	if crashed {
+		s.recoverFromCrash(lastAlive())
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatal(err)
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/?t=%s", ln.Addr().(*net.TCPAddr).Port, s.token)
 	go func() { log.Fatal(http.Serve(ln, s.handler())) }()
+	writeInstance(url)
+	stopBeat := make(chan struct{})
+	go heartbeat(stopBeat)
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -115,6 +136,9 @@ func main() {
 	}
 	<-done // by default running timers keep counting (wall-clock) and are restored on next launch
 	s.onExit()
+	close(stopBeat)
+	removeInstance()
+	releaseLock()                            // before the updated copy starts below, which must be able to take it
 	if exe := s.restartTarget(); exe != "" { // an update was installed: start the new version
 		cmd := exec.Command(exe, os.Args[1:]...)
 		detach(cmd)

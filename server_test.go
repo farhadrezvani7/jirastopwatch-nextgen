@@ -98,6 +98,38 @@ func TestWorklogUsesChosenTimezoneEstimateAndCommentMode(t *testing.T) {
 	if c, _ := call("POST", "/api/settings", `{"fontSize":99}`); c != 400 {
 		t.Errorf("absurd font size accepted: %d", c)
 	}
+	if c, _ := call("GET", "/api/issues?src=all&jql="+strings.Repeat("a", maxJQL+1), ""); c != 400 {
+		t.Errorf("oversized JQL accepted: %d", c)
+	}
+	call("GET", "/api/issues?src=all", "")
+	if !fj.has("created+%3E%3D+%222000-01-01%22+ORDER+BY+updated+DESC") {
+		t.Errorf("the unfiltered 'all' query is not the default: %v", fj.reqs)
+	}
+	call("GET", "/api/issues?src=all&cursor=50&jql=status%3D%22In+Progress%22+ORDER+BY+updated+DESC", "")
+	if !fj.has(`jql=status%3D%22In+Progress%22+ORDER+BY+updated+DESC`) {
+		t.Errorf("the JQL did not reach Jira: %v", fj.reqs)
+	}
+	if c, _ := call("POST", "/api/settings", `{"lastJql":"project = ABC"}`); c != 200 {
+		t.Errorf("lastJql rejected: %d", c)
+	}
+	// "Move to the top when started": off by default, on after the setting.
+	if c, _ := call("POST", "/api/timers", `{"key":"abc-1"}`); c != 200 {
+		t.Fatalf("add abc-1")
+	}
+	s.timers.Add("ZZ-9", "s", "p", "st") // Add puts the newest first: ZZ-9, ABC-1
+	call("POST", "/api/timers/ABC-1/start", "")
+	if ts := s.timers.Snapshot(); ts[0].Key != "ZZ-9" {
+		t.Errorf("moved to top although the setting is off: %v", ts[0].Key)
+	}
+	call("POST", "/api/settings", `{"startOnTop":true}`)
+	call("POST", "/api/timers/ABC-1/pause", "")
+	call("POST", "/api/timers/ABC-1/start", "")
+	if ts := s.timers.Snapshot(); ts[0].Key != "ABC-1" {
+		t.Errorf("a started timer did not move to the top: %v", ts[0].Key)
+	}
+	call("POST", "/api/settings", `{"startOnTop":false}`)
+	s.timers.Remove("ZZ-9")
+	s.timers.Remove("ABC-1")
 	if c, m := call("POST", "/api/timers", `{"key":"abc-1"}`); c != 200 {
 		t.Fatalf("add %d %v", c, m)
 	}
@@ -330,5 +362,85 @@ func TestTimeAdvice(t *testing.T) {
 		if got := timeAdvice(c.mode, c.ack, c.st); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// A dropped connection can leave a worklog saved in Jira although the app never saw the answer.
+// Logging again must not book it twice, must still free the timer, and a separate comment must
+// only be posted after the time is safe.
+func TestLogWorkRetryDoesNotDuplicateAndCommentComesAfter(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var seq []string
+	existing := false
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/rest/api/2/myself":
+			_, _ = w.Write([]byte(`{"displayName":"T","name":"me","key":"U1","timeZone":"UTC"}`))
+		case r.URL.Path == "/rest/api/2/serverInfo", r.URL.Path == "/rest/api/2/configuration":
+			w.WriteHeader(404)
+		case strings.HasSuffix(r.URL.Path, "/worklog") && r.Method == "GET":
+			if existing {
+				_, _ = w.Write([]byte(`{"total":1,"worklogs":[{"author":{"name":"me","key":"U1"},"started":"2026-10-17T09:00:00.000+0000","timeSpentSeconds":1800}]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"total":0,"worklogs":[]}`))
+			}
+		default:
+			seq = append(seq, r.Method+" "+r.URL.Path)
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer jsrv.Close()
+	s := newServer()
+	app := httptest.NewServer(s.handler())
+	defer app.Close()
+	call := func(method, path, body string) (int, map[string]any) {
+		req, _ := http.NewRequest(method, app.URL+path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var m map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+	if c, m := call("POST", "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`); c != 200 {
+		t.Fatalf("login %d %v", c, m)
+	}
+	call("POST", "/api/settings", `{"commentMode":"comment","timezone":"UTC"}`)
+	_ = s.timers.Add("ABC-1", "s", "p", "st")
+	_ = s.timers.SetElapsed("ABC-1", 30*time.Minute)
+	body := `{"time":"30m","started":"2026-10-17T09:00","comment":"did it"}`
+
+	// first attempt: saved normally; the worklog is posted before the comment
+	if c, m := call("POST", "/api/timers/ABC-1/log", body); c != 200 || m["warning"] != nil {
+		t.Fatalf("first log: %d %v", c, m)
+	}
+	if len(seq) != 2 || !strings.HasSuffix(seq[0], "/worklog") || !strings.HasSuffix(seq[1], "/comment") {
+		t.Errorf("order of requests: %v", seq)
+	}
+	// the answer was lost on the way: the timer still has its time, Jira already has the entry
+	_ = s.timers.SetElapsed("ABC-1", 30*time.Minute)
+	mu.Lock()
+	existing, seq = true, nil
+	mu.Unlock()
+	c, m := call("POST", "/api/timers/ABC-1/log", body)
+	if c != 200 || !strings.HasPrefix(m["warning"].(string), "warn.alreadyLogged") {
+		t.Errorf("retry: %d %v", c, m)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seq) != 0 {
+		t.Errorf("the retry posted again: %v", seq)
+	}
+	if g, _ := s.timers.Get("ABC-1"); g.Elapsed(time.Now()) != 0 {
+		t.Errorf("timer not freed after the retry: %v", g.Elapsed(time.Now()))
 	}
 }

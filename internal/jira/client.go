@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -249,23 +250,44 @@ func (r rawIssue) issue() Issue {
 const issueFields = "summary,project,status"
 
 func (c *Client) Search(ctx context.Context, jql string, max int) ([]Issue, error) {
+	out, _, err := c.SearchPage(ctx, jql, max, "")
+	return out, err
+}
+
+// SearchPage returns one page of results and a cursor for the next one ("" when that was the last).
+// The cursor is opaque to callers: Cloud pages by token, Server/Data Center by offset.
+func (c *Client) SearchPage(ctx context.Context, jql string, max int, cursor string) ([]Issue, string, error) {
 	var res struct {
-		Issues []rawIssue `json:"issues"`
+		Issues        []rawIssue `json:"issues"`
+		Total         int        `json:"total"`
+		StartAt       int        `json:"startAt"`
+		NextPageToken string     `json:"nextPageToken"`
 	}
 	q := url.Values{"jql": {jql}, "fields": {issueFields}, "maxResults": {fmt.Sprint(max)}}
 	// Cloud removed /search; Server/DC only has it.
 	path := "/rest/api/2/search"
 	if c.cloud() {
 		path = "/rest/api/3/search/jql"
+		if cursor != "" {
+			q.Set("nextPageToken", cursor)
+		}
+	} else if cursor != "" {
+		q.Set("startAt", cursor)
 	}
 	if err := c.do(ctx, "GET", path, q, nil, &res); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := make([]Issue, len(res.Issues))
 	for i, r := range res.Issues {
 		out[i] = r.issue()
 	}
-	return out, nil
+	next := ""
+	if c.cloud() {
+		next = res.NextPageToken
+	} else if n := res.StartAt + len(res.Issues); len(res.Issues) > 0 && n < res.Total {
+		next = fmt.Sprint(n)
+	}
+	return out, next, nil
 }
 
 func (c *Client) GetIssue(ctx context.Context, key string) (*Issue, error) {
@@ -382,41 +404,119 @@ type Author struct {
 // Jira's day filter is coarse (it uses the profile time zone), so the caller filters exactly.
 func (c *Client) WorklogsSince(ctx context.Context, me *User, since time.Time) ([]Worklog, error) {
 	jql := fmt.Sprintf(`worklogAuthor = currentUser() AND worklogDate >= "%s"`, since.AddDate(0, 0, -1).Format("2006-01-02"))
-	issues, err := c.Search(ctx, jql, 100)
-	if err != nil {
-		return nil, err
+	var issues []Issue
+	for cursor, pages := "", 0; pages < 5; pages++ { // up to 500 issues touched since yesterday
+		page, next, err := c.SearchPage(ctx, jql, 100, cursor)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, page...)
+		if next == "" {
+			break
+		}
+		cursor = next
 	}
-	var out []Worklog
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		out      []Worklog
+		firstErr error
+		slots    = make(chan struct{}, 6) // a few issues at a time: quick, but kind to the server
+	)
 	for _, is := range issues {
-		for startAt, pages := 0, 0; pages < 50; pages++ { // a ticket can hold thousands of worklogs
-			var res struct {
-				Total    int `json:"total"`
-				Worklogs []struct {
-					Author  Author `json:"author"`
-					Started string `json:"started"`
-					Seconds int64  `json:"timeSpentSeconds"`
-				} `json:"worklogs"`
+		wg.Add(1)
+		slots <- struct{}{}
+		go func(key string) {
+			defer func() { <-slots; wg.Done() }()
+			logs, err := c.issueWorklogs(ctx, me, key, since)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil && firstErr == nil {
+				firstErr = err
 			}
-			q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
-			if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(is.Key)+"/worklog", q, nil, &res); err != nil {
-				var ae *APIError
-				if errors.As(err, &ae) && (ae.Status == 403 || ae.Status == 404) {
-					break // one issue we may not read must not hide the rest of the day
-				}
-				return nil, err
+			out = append(out, logs...)
+		}(is.Key)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return out, nil
+}
+
+// issueWorklogs reads one issue's worklogs (paged: a ticket can hold thousands) and keeps the
+// user's own that started at or after since. An issue the user may not read is skipped, so it
+// cannot hide the rest of the day.
+func (c *Client) issueWorklogs(ctx context.Context, me *User, key string, since time.Time) ([]Worklog, error) {
+	var out []Worklog
+	for startAt, pages := 0, 0; pages < 50; pages++ {
+		var res struct {
+			Total    int `json:"total"`
+			Worklogs []struct {
+				Author  Author `json:"author"`
+				Started string `json:"started"`
+				Seconds int64  `json:"timeSpentSeconds"`
+			} `json:"worklogs"`
+		}
+		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
+		if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(key)+"/worklog", q, nil, &res); err != nil {
+			var ae *APIError
+			if errors.As(err, &ae) && (ae.Status == 403 || ae.Status == 404) {
+				return out, nil
 			}
-			for _, w := range res.Worklogs {
-				st, err := time.Parse("2006-01-02T15:04:05.000-0700", w.Started)
-				if err != nil || st.Before(since) || !me.IsMine(w.Author) {
-					continue
-				}
-				out = append(out, Worklog{is.Key, st, w.Seconds})
+			return nil, err
+		}
+		for _, w := range res.Worklogs {
+			st, err := time.Parse("2006-01-02T15:04:05.000-0700", w.Started)
+			if err != nil || st.Before(since) || !me.IsMine(w.Author) {
+				continue
 			}
-			startAt += len(res.Worklogs)
-			if len(res.Worklogs) == 0 || startAt >= res.Total {
-				break
-			}
+			out = append(out, Worklog{key, st, w.Seconds})
+		}
+		startAt += len(res.Worklogs)
+		if len(res.Worklogs) == 0 || startAt >= res.Total {
+			break
 		}
 	}
 	return out, nil
+}
+
+// HasWorklog reports whether the user already has a worklog on key with this start (to the minute)
+// and length. It is how a retry after a dropped connection avoids booking the same time twice.
+func (c *Client) HasWorklog(ctx context.Context, me *User, key string, started time.Time, d time.Duration) (bool, error) {
+	if me == nil {
+		return false, nil
+	}
+	for startAt, pages := 0, 0; pages < 50; pages++ {
+		var res struct {
+			Total    int `json:"total"`
+			Worklogs []struct {
+				Author  Author `json:"author"`
+				Started string `json:"started"`
+				Created string `json:"created"`
+				Seconds int64  `json:"timeSpentSeconds"`
+			} `json:"worklogs"`
+		}
+		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
+		if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(key)+"/worklog", q, nil, &res); err != nil {
+			return false, err
+		}
+		for _, w := range res.Worklogs {
+			st, err := time.Parse("2006-01-02T15:04:05.000-0700", w.Started)
+			if err != nil || !me.IsMine(w.Author) || w.Seconds != int64(d.Round(time.Minute)/time.Second) || !st.Truncate(time.Minute).Equal(started.Truncate(time.Minute)) {
+				continue
+			}
+			// A retry follows within minutes. An identical entry that was created long ago is a
+			// deliberate, separate one (e.g. the same hour booked twice by choice), not a leftover.
+			if cr, err := time.Parse("2006-01-02T15:04:05.000-0700", w.Created); err == nil && time.Since(cr) > 6*time.Hour {
+				continue
+			}
+			return true, nil
+		}
+		startAt += len(res.Worklogs)
+		if len(res.Worklogs) == 0 || startAt >= res.Total {
+			break
+		}
+	}
+	return false, nil
 }

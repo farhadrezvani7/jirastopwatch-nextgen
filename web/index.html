@@ -245,6 +245,7 @@ body.aside-closed #app{grid-template-columns:minmax(0,1fr)}
     <label class="check"><input id="remember" type="checkbox" checked> <span data-i18n="login.remember"></span></label>
     <div class="hint" id="rememberHint" style="margin-top:4px" data-i18n="login.rememberHint"></div>
 
+    <button class="btn block ghost hidden" id="offlineBtn" type="button" data-i18n="login.offline"></button>
     <button class="btn block" id="loginBtn" type="submit" data-i18n="login.signin"></button>
     <div class="err" id="loginErr" role="alert"></div>
   </form>
@@ -264,6 +265,7 @@ body.aside-closed #app{grid-template-columns:minmax(0,1fr)}
   </header>
 
   <main>
+    <div id="offbar" class="updbar hidden"><span data-i18n="login.offlineNote"></span></div>
     <div id="updbar" class="updbar hidden"><span id="updtext"></span> <a id="updlink" target="_blank" rel="noopener"></a> <button type="button" class="iconbtn" id="updx" aria-label="×">✕</button></div>
     <form class="addrow" id="addForm">
       <input id="addKey" class="ltr" type="text" data-ph="add.placeholder" spellcheck="false" autocomplete="off">
@@ -278,8 +280,9 @@ body.aside-closed #app{grid-template-columns:minmax(0,1fr)}
       <button data-src="recent" class="on" data-i18n="tab.recent"></button>
       <button data-src="assigned" data-i18n="tab.assigned"></button>
       <button data-src="filter" data-i18n="tab.filters"></button>
+      <button data-src="all" data-i18n="tab.all"></button>
     </div>
-    <div class="search" style="display:flex;gap:8px"><input id="q" type="text" data-ph="search.ph" autocomplete="off"><button class="iconbtn" id="reload" type="button" data-tip="reload.tip">⟳</button><button class="iconbtn" id="asideClose" type="button" aria-label="Close">✕</button></div>
+    <div class="search" style="display:flex;gap:8px"><input id="q" type="text" data-ph="search.ph" autocomplete="off"><button class="iconbtn hidden" id="jqlBtn" type="button" data-tip="jql.title"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg></button><button class="iconbtn" id="reload" type="button" data-tip="reload.tip">⟳</button><button class="iconbtn" id="asideClose" type="button" aria-label="Close">✕</button></div>
     <div class="filterbar hidden" id="filterbar"></div>
     <div class="list" id="list"></div>
   </aside>
@@ -297,6 +300,7 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
+let offlineMode = false;   // running without a Jira connection (see goOffline)
 async function api(method, path, body) {
   let res;
   try {
@@ -307,8 +311,10 @@ async function api(method, path, body) {
   } catch { throw new Error(t("err.appGone")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && path !== "/api/login") showLogin();
-    throw new Error(tr(data.error || `Error ${res.status}`));
+    if (res.status === 401 && path !== "/api/login" && !offlineMode) showLogin();
+    const err = new Error(tr(data.error || `Error ${res.status}`));
+    err.code = data.error || "";
+    throw err;
   }
   return data;
 }
@@ -470,10 +476,23 @@ async function fetchToday() {
 setInterval(fetchToday, 120000);
 window.addEventListener("focus", fetchToday);
 
+let lastSaveError = "";
 async function refresh() {
   const s = await api("GET", "/api/state");
+  if (s.saveError && s.saveError !== lastSaveError) toast(t("err.saveTimers", {0: s.saveError}), true);   // disk full / read-only folder
+  lastSaveError = s.saveError;
   timers = s.timers; pauseOthers = s.pauseOthers; zoneInfo = s.zone; fetchedAt = Date.now();
   renderTimers(); renderList(); updateClock();
+}
+
+/* ---------- offline start: timers work without Jira; sign in again automatically when it is back ---------- */
+async function goOffline(info) {
+  offlineMode = true;
+  await enterApp({displayName: t("login.offline")}, info);
+  $("#offbar").classList.remove("hidden");
+  setInterval(async () => {
+    try { await api("POST", "/api/login", {}); location.reload(); } catch {}
+  }, 15000);
 }
 
 /* ---------- login ---------- */
@@ -794,7 +813,7 @@ async function logDialog(x) {
         time: time.value, started: started.value, comment: comment.value, transition: trans.value,
         estimate: est.value, estimateValue: estVal.value});
       if (restart) await api("POST", `/api/timers/${x.key}/start`);
-      close(); toast((r.warning ? tr(r.warning) : t("log.done", {time: time.value, key: x.key})) + `  ·  ${started.value.replace("T", " ")}${zoneInfo ? " " + zoneInfo.name : ""}`, !!r.warning); refresh(); fetchToday();
+      close(); toast((r.warning ? [r.warning, r.warning2].filter(Boolean).map(tr).join("  ·  ") : t("log.done", {time: time.value, key: x.key})) + `  ·  ${started.value.replace("T", " ")}${zoneInfo ? " " + zoneInfo.name : ""}`, !!r.warning); refresh(); fetchToday();
     } catch (ex) { toast(ex.message, true); submit.disabled = again.disabled = false; submit.textContent = t("log.btn"); }
   };
   form.onsubmit = e => { e.preventDefault(); doLog(false); };
@@ -871,6 +890,7 @@ async function settingsDialog() {
   themeSel.value = prefs.theme || "";
   const fsSel = el("select", {}, ...[10, 11, 12, 13, 14, 15, 16].map(n => el("option", {value: n, textContent: n + " px"})));
   fsSel.value = prefs.fontSize || DEFAULT_FS;
+  const topChk = el("input", {type: "checkbox", checked: !!prefs.startOnTop});
   const shChk = el("input", {type: "checkbox", checked: !!prefs.shadows});
   const preview = () => applyLook(+fsSel.value, shChk.checked);
   fsSel.onchange = shChk.onchange = preview;
@@ -890,6 +910,7 @@ async function settingsDialog() {
   const tmField = tmShown ? el("div", {}, field(t("set.timeMode"), tmSel), el("div", {className: "hint", dir: "auto", textContent: t("tm.settingNote", clockVars())})) : el("span");
   const body = el("div", {}, field(t("set.language"), langCombo.el), langNote, field(t("theme.label"), themeSel),
     field(t("set.fontSize"), fsSel), el("label", {className: "check"}, shChk, " ", t("set.shadows")),
+    el("label", {className: "check"}, topChk, " ", t("set.startOnTop")),
     field(t("set.country"), countryCombo.el), zoneBox, note, tmField,
     field(t("set.commentMode"), cm), field(t("set.startTransitions"), st), el("div", {className: "hint", textContent: t("set.startHint")}),
     field(t("set.lock"), lockSel), field(t("set.exit"), exitSel), updRow);
@@ -900,7 +921,7 @@ async function settingsDialog() {
   obs.observe(document.body, {childList: true});
   form.onsubmit = async e => {
     e.preventDefault();
-    const next = {fontSize: +fsSel.value === DEFAULT_FS ? 0 : +fsSel.value, shadows: shChk.checked, lockMode: lockSel.value, exitMode: exitSel.value, ...(prefs.updateEnabled ? {updateCheck: updChk.checked} : {}), theme: themeSel.value, lang: langCombo.get(), country: countryCombo.get(), timezone: chosenZone(),
+    const next = {fontSize: +fsSel.value === DEFAULT_FS ? 0 : +fsSel.value, shadows: shChk.checked, startOnTop: topChk.checked, lockMode: lockSel.value, exitMode: exitSel.value, ...(prefs.updateEnabled ? {updateCheck: updChk.checked} : {}), theme: themeSel.value, lang: langCombo.get(), country: countryCombo.get(), timezone: chosenZone(),
       commentMode: cm.value === "worklog" ? "" : cm.value, startTransitions: st.value};
     if (tmShown) next.timeMode = tmSel.value;
     try {
@@ -930,9 +951,43 @@ $("#tabs").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
   for (const x of $("#tabs").children) x.classList.toggle("on", x === b);
   src = b.dataset.src; $("#q").value = "";
-  $("#filterbar").classList.toggle("hidden", src !== "filter");
+  $("#jqlBtn").classList.toggle("hidden", src !== "all");   // advanced search belongs to the "All" tab
+  $("#filterbar").replaceChildren();
+  if (src === "filter" && filterCombo) $("#filterbar").replaceChildren(filterCombo.el);
+  if (src === "all" && jqlText) showJqlBar();
+  $("#filterbar").classList.toggle("hidden", src !== "filter" && !(src === "all" && jqlText));
   if (src === "filter") loadFilters(); else loadList();
 };
+// Advanced search: a JQL query, as in Jira's issue search.
+let jqlText = "";
+function jqlDialog() {
+  const ta = el("textarea", {rows: 4, className: "ltr", spellcheck: false, value: jqlText || prefs.lastJql || "", placeholder: "status = \"In Progress\" AND resolution = Unresolved ORDER BY updated DESC"});
+  ta.style.fontFamily = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  const run = el("button", {type: "submit", className: "btn", textContent: t("jql.run")});
+  const {close, form} = modal(t("jql.title"), t("jql.hint"), el("div", {style: "margin-top:12px"}, ta),
+    close => [cancelBtn(close), run]);
+  form.onsubmit = e => {
+    e.preventDefault();
+    const v = ta.value.trim(); if (!v) return;
+    close(); jqlText = prefs.lastJql = v;
+    api("POST", "/api/settings", {lastJql: v}).catch(() => {});
+    $("#q").value = ""; showJqlBar(); loadList();
+  };
+  ta.onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) form.requestSubmit(); };
+  ta.focus();
+}
+function showJqlBar() {
+  const bar = $("#filterbar");
+  const code = el("code", {textContent: jqlText, dir: "ltr", title: jqlText});
+  code.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer";
+  code.onclick = jqlDialog;
+  const x = el("button", {type: "button", className: "iconbtn", textContent: "✕", ariaLabel: "Clear"});
+  x.style.padding = "2px 8px";
+  x.onclick = () => { jqlText = ""; $("#filterbar").replaceChildren(); $("#filterbar").classList.add("hidden"); loadList(); };
+  bar.replaceChildren(el("div", {className: "proj", style: "display:flex;gap:8px;align-items:center"}, code, x));
+  bar.classList.remove("hidden");
+}
+$("#jqlBtn").onclick = jqlDialog;
 let qTimer;
 $("#q").oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(loadList, 350); };
 $("#reload").onclick = () => { if (src === "filter" && !filterCombo) loadFilters(); else loadList(); };
@@ -955,12 +1010,25 @@ async function loadList() {
   let url = "/api/issues?src=" + src;
   if (q) url = "/api/issues?src=search&q=" + encodeURIComponent(q);
   else if (src === "filter") { if (!filterCombo) return; url += "&filter=" + filterCombo.get(); }
-  loading = true;
+  else if (src === "all" && jqlText) url += "&jql=" + encodeURIComponent(jqlText);
+  loading = true; listBase = url; listNext = "";
   $("#list").replaceChildren(el("div", {className: "note"}, el("span", {className: "spin"})));
   try {
     const d = await api("GET", url);
-    if (seq === listSeq) { loading = false; setList(d, "list.none"); }
+    if (seq === listSeq) { loading = false; listNext = d.next || ""; setList(d.issues, "list.none"); }
   } catch (ex) { if (seq === listSeq) { loading = false; setList([], ex.message, true); } }
+}
+// "Load more": the next page of the same query, appended below what is already shown.
+let listBase = "", listNext = "";
+async function loadMore(btn) {
+  const seq = listSeq;
+  btn.disabled = true;
+  try {
+    const d = await api("GET", listBase + "&cursor=" + encodeURIComponent(listNext));
+    if (seq !== listSeq) return;
+    const box = $("#list"), top = box.scrollTop;
+    listNext = d.next || ""; listData = listData.concat(d.issues); renderList(); box.scrollTop = top;
+  } catch (ex) { btn.disabled = false; toast(ex.message, true); }
 }
 function setList(d, msg, raw) { listData = d; listMsg = raw ? msg : t(msg); listKey = raw ? null : msg; renderList(); }
 let listMsg = "", listKey = "list.none", loading = false;
@@ -976,6 +1044,12 @@ function renderList() {
       el("div", {className: "s", dir: "auto", textContent: i.summary}));
     b.onclick = () => have.has(i.key) ? toast(t("list.already", {key: i.key})) : addIssue(i.key);
     box.append(b);
+  }
+  if (listNext) {
+    const more = el("button", {type: "button", className: "btn ghost", textContent: t("list.more")});
+    more.style.cssText = "display:block;margin:8px auto 4px";
+    more.onclick = () => loadMore(more);
+    box.append(more);
   }
 }
 
@@ -1055,7 +1129,10 @@ async function updateFlow() {
   if (!u.newer) { toast(t("upd.uptodate", {0: u.current})); return; }
   const info = el("div", {}, el("p", {textContent: t("upd.ask", {latest: u.latest, current: u.current})}));
   const status = el("div", {className: "hint"});
-  const go = el("button", {type: "submit", className: "btn", textContent: t("upd.now")});
+  const running = u.running || [];
+  const go = el("button", {type: "submit", className: "btn", textContent: running.length ? t("upd.pauseUpdate") : t("upd.now")});
+  // Running timers have to be settled first: pause them here, or close this and log them.
+  if (running.length) info.append(el("p", {className: "hint", dir: "auto", textContent: t("upd.running", {0: running.join(", ")})}));
   if (!u.canInstall) {
     go.classList.add("hidden");
     info.replaceChildren(el("p", {textContent: t("err.updNoWrite")}), el("a", {href: u.url, target: "_blank", rel: "noopener", textContent: u.url, dir: "ltr"}));
@@ -1065,6 +1142,7 @@ async function updateFlow() {
   form.onsubmit = async e => {
     e.preventDefault(); go.disabled = true; status.textContent = t("upd.installing");
     try {
+      if (running.length) { await api("POST", "/api/timers/pause-all"); refresh(); }
       const r = await api("POST", "/api/update/apply");
       status.textContent = t("upd.done", {0: r.version});
     } catch (ex) {
@@ -1083,13 +1161,22 @@ setInterval(() => fetch("/api/ping").catch(() => {}), 10000);
     const s = await api("GET", "/api/session");
     prefs = s.prefs;
     await applyI18n();
+    // The app ended abruptly last time (crash, power cut): running timers were stopped where they last were.
+    if (s.recovered) setTimeout(() => toast(t("warn.recovered", {0: s.recovered.keys.join(", "), 1: s.recovered.at}), true), 1200);
     if (s.loggedIn) await enterApp(s.user, s);
     else if (s.hasSaved) {
       // Stay signed in: reuse the remembered credentials instead of asking again.
-      let failure = "";
+      let failure = "", failureCode = "";
       try { await enterApp((await api("POST", "/api/login", {})).user, await api("GET", "/api/session")); }
-      catch (ex) { failure = ex.message; }
-      if (failure) { showLogin(s); $("#loginErr").textContent = failure; }
+      catch (ex) { failure = ex.message; failureCode = ex.code || ""; }
+      if (failure) {
+        showLogin(s); $("#loginErr").textContent = failure;
+        // No connection at start-up: the timers are still on this computer, so let the user reach them.
+        if (String(failureCode).startsWith("err.unreachable")) {
+          $("#offlineBtn").classList.remove("hidden");
+          $("#offlineBtn").onclick = () => goOffline(s);
+        }
+      }
     } else showLogin(s);
   } catch (e) { document.body.textContent = e.message; }
 })();

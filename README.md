@@ -56,7 +56,7 @@ Download the file for your system from the [**Releases**](https://github.com/far
 > No Chromium-based browser? The app opens in your default browser instead and quits when you close the tab.
 
 ### Updating
-Click the profile icon (top right) → **Check for updates**. If a newer release exists, confirm and the app downloads it, verifies its checksum, replaces itself and restarts, with no uninstalling and no manual download. Running timers keep counting. Copies installed system-wide (e.g. from a `.deb`/`.rpm` in `/usr/bin`) ask for your administrator password (polkit/`pkexec`) to replace the file; if `pkexec` isn't available the dialog links to the download page instead.
+Click the profile icon (top right) → **Check for updates**. If a newer release exists, confirm and the app downloads it, verifies its checksum, replaces itself and restarts, with no uninstalling and no manual download. Running timers must be paused or logged first (the dialog offers *Pause all & update*); paused timers keep their time. Copies installed system-wide (e.g. from a `.deb`/`.rpm` in `/usr/bin`) ask for your administrator password (polkit/`pkexec`) to replace the file; if `pkexec` isn't available the dialog links to the download page instead.
 
 ### Build from source (any OS)
 ```bash
@@ -117,9 +117,11 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 - 🕒 **Jira server-clock aware** — Jira stores the exact moment, but its reports group days by the *server's* time zone. If that differs from yours (and from your Jira profile), the app tells you and lets you opt in to writing your local clock time on the server's clock so reports land on the right day; switch back in Settings any time (the app also offers it once the server's zone is fixed).
 - 🔑 **Stays signed in** — your token is kept in the system credential store and the app signs you in on launch.
 - 📊 **Logged today** — the header shows everything you have logged in Jira today (all issues, in your chosen time zone) and each card shows what you logged on that issue today, so even many worklogs on one ticket add up at a glance.
+- ⤴️ **Started timers jump to the top** — optional (Settings): a timer that starts moves to the top of the list by itself, so you never reorder by hand.
 - 🔁 **Log & start again** — a button in the log dialog books the worklog and immediately restarts the same issue's timer, no searching needed.
 - ✋ **Drag and drop** — press and hold a card, then drag it to a new place (▲▼ and `Ctrl+↑/↓` still work).
 - 🎛 **Look, your way** — in *Settings* pick the base font size (10–16 px, previewed live) and switch soft drop shadows on or off (off by default).
+- 🔍 **All issues + advanced search (JQL)** — the *All* tab lists every issue you can see in Jira, from any team, newest first, with *Load more* paging. In that tab the funnel icon opens a JQL box, e.g. `status = Develop AND resolution = Unresolved AND labels = Flutter ORDER BY updated DESC`. Jira runs it as you, so permissions apply and syntax errors are shown as Jira words them; your last query is remembered.
 - 👤 **Profile window** — the header shows just a profile icon; click it to see who is signed in, toggle *pause others*, open Settings, check for updates or sign out.
 - 📱 **Responsive & compact** — the layout adapts down to phone-width windows (the issue list becomes a slide-over panel), and slimmer cards and a one-row header fit more without scrolling. The issue panel can be collapsed on wide windows too.
 - 🔔 **Tray icon** — on Windows and on Linux desktops with a tray: quick access to the window, running-timer tooltip, pause all, quit (see [Tray icon](#tray-icon)).
@@ -135,6 +137,14 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 | `Ctrl+Del` | Remove | `Ctrl+V` | Add pasted key / link |
 
 ---
+
+## Your time is safe
+- **Crash or power cut** — timers are saved to disk the moment they change, written so that a power failure can't leave an empty file (the data is flushed first and the previous copy is kept as a backup that is used automatically if the file is ever damaged). Running timers are stored as a start time, so the time keeps counting while the app is closed normally. After a crash or power cut the app stops running timers at the last moment it was alive (it records that every 20 seconds) and tells you, so the hours the computer was off are never counted as work.
+- **Internet drops while logging** — nothing is lost: the timer and your unsent note stay as they were and you can log again. If Jira had already saved the entry before the connection broke, logging again recognises the identical entry (same start minute and length) and does not book it twice. The worklog is posted first and a separate comment after it, so a failure can never duplicate a comment or lose time.
+- **No internet at start-up** — *Continue offline* opens your timers; Jira is reconnected automatically when it is back.
+- **Only one copy at a time** — the running copy holds an operating-system lock (released automatically if it dies), so launching the app again just brings up the running copy and two copies can never overwrite each other's timers.
+- **Updates** — the app won't update while a timer is running (pause or log it first; the dialog offers *Pause all & update*), and an update interrupted by a power cut leaves the old version in place.
+- **Disk full / read-only folder** — you are told right away that timers could not be saved. A clock that is set back never removes time you have already counted. Your sign-in secret is never left behind in backup copies.
 
 ## Privacy & security
 - Your data goes **only to your own Jira site** — nothing else is contacted (the update check, which asks GitHub for the latest release, is off unless a release repo is configured at build time and can be switched off in Settings; a new version is only downloaded after you confirm).

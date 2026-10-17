@@ -4,10 +4,10 @@ package timer
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"jirastopwatch-nextgen/internal/fsutil"
 )
 
 // Timer is one issue stopwatch. Accumulated is time banked from earlier
@@ -27,7 +27,16 @@ func (t *Timer) Elapsed(now time.Time) time.Duration {
 	if t.RunningSince == nil {
 		return t.Accumulated
 	}
-	return t.Accumulated + now.Sub(*t.RunningSince)
+	return t.Accumulated + runSpan(now, *t.RunningSince)
+}
+
+// runSpan is how long a run has lasted. If the computer's clock was set back (time sync, DST
+// mistakes, a wrong date fixed by hand) the span would be negative and eat banked time: count zero.
+func runSpan(now, since time.Time) time.Duration {
+	if d := now.Sub(since); d > 0 {
+		return d
+	}
+	return 0
 }
 
 func (t *Timer) Running() bool { return t.RunningSince != nil }
@@ -37,6 +46,16 @@ type Manager struct {
 	path   string
 	timers []*Timer // display order
 	Now    func() time.Time
+
+	saveErr string // why the last write to disk failed ("" = fine)
+}
+
+// SaveError is the reason the timers could not be written to disk the last time (disk full,
+// read-only folder, ...), or "" when everything is saved. The page tells the user.
+func (m *Manager) SaveError() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saveErr
 }
 
 var (
@@ -49,9 +68,8 @@ const MaxTimers = 20
 
 func Load(path string) *Manager {
 	m := &Manager{path: path, Now: time.Now}
-	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &m.timers)
-	}
+	// A damaged file (power cut mid-write) falls back to the last good copy; see fsutil.ReadJSON.
+	_, _ = fsutil.ReadJSON(path, &m.timers)
 	return m
 }
 
@@ -60,10 +78,10 @@ func (m *Manager) save() {
 		return
 	}
 	b, _ := json.MarshalIndent(m.timers, "", " ")
-	_ = os.MkdirAll(filepath.Dir(m.path), 0o700)
-	tmp := m.path + ".tmp"
-	if os.WriteFile(tmp, b, 0o600) == nil {
-		_ = os.Rename(tmp, m.path)
+	if err := fsutil.WriteAtomic(m.path, b, 0o600); err != nil {
+		m.saveErr = err.Error()
+	} else {
+		m.saveErr = ""
 	}
 }
 
@@ -152,7 +170,7 @@ func (m *Manager) Start(key string, pauseOthers bool) error {
 
 func pause(t *Timer, now time.Time) {
 	if t.RunningSince != nil {
-		t.Accumulated += now.Sub(*t.RunningSince)
+		t.Accumulated += runSpan(now, *t.RunningSince)
 		t.RunningSince = nil
 	}
 }
@@ -254,6 +272,24 @@ func (m *Manager) MoveAfter(key, after string) error {
 	m.timers = append(rest[:at], append([]*Timer{item}, rest[at:]...)...)
 	m.save()
 	return nil
+}
+
+// PauseRunningAt pauses every running timer as of the given moment (not "now") and returns their
+// keys. It is how time the computer spent switched off after a crash is not counted as work.
+func (m *Manager) PauseRunningAt(at time.Time) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var keys []string
+	for _, t := range m.timers {
+		if t.RunningSince != nil {
+			pause(t, at)
+			keys = append(keys, t.Key)
+		}
+	}
+	if len(keys) > 0 {
+		m.save()
+	}
+	return keys
 }
 
 // PauseRunning pauses every running timer and returns their keys.

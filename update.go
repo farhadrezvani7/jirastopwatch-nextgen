@@ -142,6 +142,7 @@ func (s *server) updateCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"latest": u.Latest, "url": u.URL, "newer": u.Newer, "current": version,
 		"canInstall": err == nil && (writable(filepath.Dir(exe)) || canElevate()),
+		"running":    s.runningKeys(),
 	})
 }
 
@@ -156,6 +157,12 @@ func (s *server) updateApply(w http.ResponseWriter, r *http.Request) {
 	s.updating = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.updating = false; s.mu.Unlock() }()
+
+	// Running timers must be settled (paused or logged) by the user first; the page offers "pause all".
+	if keys := s.runningKeys(); len(keys) > 0 {
+		fail(w, 409, "err.updRunning")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
@@ -196,6 +203,17 @@ func (s *server) updateApply(w http.ResponseWriter, r *http.Request) {
 	if quit != nil {
 		go func() { time.Sleep(600 * time.Millisecond); quit() }() // let the answer reach the page first
 	}
+}
+
+// runningKeys lists the issues whose timers are running right now.
+func (s *server) runningKeys() []string {
+	keys := []string{}
+	for _, t := range s.timers.Snapshot() {
+		if t.Running() {
+			keys = append(keys, t.Key)
+		}
+	}
+	return keys
 }
 
 func (s *server) setQuit(f func()) { s.mu.Lock(); s.quit = f; s.mu.Unlock() }

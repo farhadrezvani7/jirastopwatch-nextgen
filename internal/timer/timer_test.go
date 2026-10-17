@@ -83,6 +83,17 @@ func TestMoveAndLimit(t *testing.T) {
 	if got := order(); got != "C-3 A-1 B-2 " {
 		t.Errorf("edge move changed order: %s", got)
 	}
+	m.MoveAfter("C-3", "B-2") // drag to the end
+	if got := order(); got != "A-1 B-2 C-3 " {
+		t.Errorf("after drag to end: %s", got)
+	}
+	m.MoveAfter("B-2", "") // drag to the top
+	if got := order(); got != "B-2 A-1 C-3 " {
+		t.Errorf("after drag to top: %s", got)
+	}
+	if m.MoveAfter("B-2", "Z-9") != ErrNotFound || m.MoveAfter("Z-9", "") != ErrNotFound {
+		t.Error("drag with a missing key")
+	}
 	if m.Move("Z-9", 1) != ErrNotFound {
 		t.Error("missing key")
 	}

@@ -39,7 +39,10 @@ type Issue struct {
 type User struct {
 	DisplayName string `json:"displayName"`
 	Email       string `json:"emailAddress"`
-	TimeZone    string `json:"timeZone"` // the zone Jira shows this user's times in (profile setting)
+	TimeZone    string `json:"timeZone"`            // the zone Jira shows this user's times in (profile setting)
+	AccountID   string `json:"accountId,omitempty"` // Cloud
+	Name        string `json:"name,omitempty"`      // Server/DC username
+	Key         string `json:"key,omitempty"`       // Server/DC user key
 }
 
 type Filter struct {
@@ -346,4 +349,74 @@ func (c *Client) Remaining(ctx context.Context, key string) (RemainingEstimate, 
 		return RemainingEstimate{}, err
 	}
 	return RemainingEstimate{r.Fields.TT.Text, r.Fields.TT.Seconds}, nil
+}
+
+// Worklog is one time entry; only what the day totals need.
+type Worklog struct {
+	Key     string
+	Started time.Time
+	Seconds int64
+}
+
+// IsMine reports whether a worklog author (as Jira reports it) is this user.
+func (u *User) IsMine(a Author) bool {
+	switch {
+	case u.AccountID != "" && a.AccountID != "":
+		return u.AccountID == a.AccountID
+	case u.Key != "" && a.Key != "":
+		return u.Key == a.Key
+	case u.Name != "" && a.Name != "":
+		return u.Name == a.Name
+	}
+	return u.Email != "" && strings.EqualFold(u.Email, a.Email)
+}
+
+type Author struct {
+	AccountID string `json:"accountId"`
+	Name      string `json:"name"`
+	Key       string `json:"key"`
+	Email     string `json:"emailAddress"`
+}
+
+// WorklogsSince returns the current user's worklogs started at or after since, across all issues.
+// Jira's day filter is coarse (it uses the profile time zone), so the caller filters exactly.
+func (c *Client) WorklogsSince(ctx context.Context, me *User, since time.Time) ([]Worklog, error) {
+	jql := fmt.Sprintf(`worklogAuthor = currentUser() AND worklogDate >= "%s"`, since.AddDate(0, 0, -1).Format("2006-01-02"))
+	issues, err := c.Search(ctx, jql, 100)
+	if err != nil {
+		return nil, err
+	}
+	var out []Worklog
+	for _, is := range issues {
+		for startAt, pages := 0, 0; pages < 50; pages++ { // a ticket can hold thousands of worklogs
+			var res struct {
+				Total    int `json:"total"`
+				Worklogs []struct {
+					Author  Author `json:"author"`
+					Started string `json:"started"`
+					Seconds int64  `json:"timeSpentSeconds"`
+				} `json:"worklogs"`
+			}
+			q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
+			if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(is.Key)+"/worklog", q, nil, &res); err != nil {
+				var ae *APIError
+				if errors.As(err, &ae) && (ae.Status == 403 || ae.Status == 404) {
+					break // one issue we may not read must not hide the rest of the day
+				}
+				return nil, err
+			}
+			for _, w := range res.Worklogs {
+				st, err := time.Parse("2006-01-02T15:04:05.000-0700", w.Started)
+				if err != nil || st.Before(since) || !me.IsMine(w.Author) {
+					continue
+				}
+				out = append(out, Worklog{is.Key, st, w.Seconds})
+			}
+			startAt += len(res.Worklogs)
+			if len(res.Worklogs) == 0 || startAt >= res.Total {
+				break
+			}
+		}
+	}
+	return out, nil
 }

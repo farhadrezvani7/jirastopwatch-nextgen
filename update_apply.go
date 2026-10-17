@@ -83,8 +83,25 @@ var errNotWritable = errors.New("err.updNoWrite")
 // SHA-256 against the release's SHA256SUMS.txt and that it starts, and returns its path.
 func downloadUpdate(ctx context.Context, tag, exe string) (string, error) {
 	dir := filepath.Dir(exe)
+	var stage string // private temp folder for an elevated install; removed unless the download succeeds
+	succeeded := false
+	defer func() {
+		if !succeeded && stage != "" {
+			os.RemoveAll(stage)
+		}
+	}()
 	if !writable(dir) {
-		return "", errNotWritable
+		if !canElevate() {
+			return "", errNotWritable
+		}
+		// Installed system-wide (.deb/.rpm): stage the download in a private temp folder; swapBinary
+		// then copies it into place through pkexec, which shows the system password prompt.
+		tmpDir, err := os.MkdirTemp("", "jsw-update-")
+		if err != nil {
+			return "", err
+		}
+		dir = tmpDir
+		stage = tmpDir
 	}
 	base := downloadBase + "/" + updateRepo + "/releases/download/" + tag + "/"
 	name := assetName(runtime.GOOS, runtime.GOARCH)
@@ -150,12 +167,20 @@ func downloadUpdate(ctx context.Context, tag, exe string) (string, error) {
 		return "", errors.New("the downloaded file does not run on this computer")
 	}
 	ok = true
+	succeeded = true
 	return path, nil
 }
 
 // swapBinary puts newPath in place of exe. Unix allows renaming over a running binary; Windows
 // does not, but allows renaming the running file out of the way first.
 func swapBinary(newPath, exe string) error {
+	if !writable(filepath.Dir(exe)) && canElevate() {
+		defer os.RemoveAll(filepath.Dir(newPath))
+		if out, err := exec.Command("pkexec", "install", "-m", "0755", newPath, exe).CombinedOutput(); err != nil {
+			return fmt.Errorf("could not install with administrator rights: %v %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
 	if runtime.GOOS != "windows" {
 		return os.Rename(newPath, exe)
 	}
@@ -169,6 +194,16 @@ func swapBinary(newPath, exe string) error {
 		return err
 	}
 	return nil
+}
+
+// canElevate reports whether a protected install can be updated by asking for the
+// administrator password (Linux polkit).
+var canElevate = func() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	_, err := exec.LookPath("pkexec")
+	return err == nil
 }
 
 // removeOldBinary deletes the file a previous Windows update left behind.

@@ -110,6 +110,9 @@ func TestDownloadRefusedWhenFolderNotWritable(t *testing.T) {
 	exe := filepath.Join(dir, "app")
 	os.WriteFile(exe, []byte("old"), 0o755)
 	os.Chmod(dir, 0o555)
+	oc := canElevate
+	canElevate = func() bool { return false }
+	defer func() { canElevate = oc }()
 	defer os.Chmod(dir, 0o755)
 	fakeGitHub(t, "v2.0.0", []byte("x"), "")
 	if _, err := downloadUpdate(t.Context(), "v2.0.0", exe); err != errNotWritable {

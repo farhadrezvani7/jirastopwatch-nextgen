@@ -141,7 +141,7 @@ func (s *server) updateCheck(w http.ResponseWriter, r *http.Request) {
 	exe, err := exePath()
 	writeJSON(w, 200, map[string]any{
 		"latest": u.Latest, "url": u.URL, "newer": u.Newer, "current": version,
-		"canInstall": err == nil && writable(filepath.Dir(exe)),
+		"canInstall": err == nil && (writable(filepath.Dir(exe)) || canElevate()),
 	})
 }
 

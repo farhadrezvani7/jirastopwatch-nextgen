@@ -37,7 +37,7 @@ Download the file for your system from the [**Releases**](https://github.com/far
 ### macOS
 1. Download `jirastopwatch-nextgen-macos-arm64.zip` (Apple Silicon: M1–M4) or `…-macos-amd64.zip` (Intel).
 2. Open the zip and drag **Jira StopWatch NextGen** into **Applications**.
-3. First launch only: because the app is not notarized, macOS blocks it. Open it once, then go to **System Settings → Privacy & Security → Open Anyway**. (On older macOS: right-click the app → **Open**.)
+3. First launch only: the app is signed ad-hoc but not notarized (that needs a paid Apple Developer account), so macOS asks about an "unidentified developer". Open it once, then go to **System Settings → Privacy & Security → Open Anyway**. (On older macOS: right-click the app → **Open**.) If macOS says the app is "damaged", run `xattr -dr com.apple.quarantine "/Applications/Jira StopWatch NextGen.app"` once.
 
 ### Linux
 - **Ubuntu / Debian / Mint:** download `jirastopwatch-nextgen-linux-amd64.deb` (or `…-arm64.deb`), double-click it and press **Install** in the software center.
@@ -52,7 +52,7 @@ Download the file for your system from the [**Releases**](https://github.com/far
 > No Chromium-based browser? The app opens in your default browser instead and quits when you close the tab.
 
 ### Updating
-Open the menu under your name → **Check for updates**. If a newer release exists, confirm and the app downloads it, verifies its checksum, replaces itself and restarts, with no uninstalling and no manual download. Running timers keep counting. Copies installed system-wide (e.g. from a `.deb`/`.rpm` in `/usr/bin`) can't replace themselves; for those the dialog links to the download page instead.
+Open the menu under your name → **Check for updates**. If a newer release exists, confirm and the app downloads it, verifies its checksum, replaces itself and restarts, with no uninstalling and no manual download. Running timers keep counting. Copies installed system-wide (e.g. from a `.deb`/`.rpm` in `/usr/bin`) ask for your administrator password (polkit/`pkexec`) to replace the file; if `pkexec` isn't available the dialog links to the download page instead.
 
 ### Build from source (any OS)
 ```bash
@@ -97,7 +97,7 @@ The original is a C# / WinForms / .NET Framework desktop app for Windows. NextGe
 | **Tests** | NUnit | Go tests, run by CI on **Windows, macOS and Linux** |
 
 ### Everything from the original that is kept
-Multiple stopwatches · pause others when one starts · edit time · remaining-estimate adjustment (auto / leave / set to / reduce by) · post the note as worklog comment, separate comment, or both · move an issue to e.g. *In Progress* when its timer starts · pause on lock · choose what happens on exit · keyboard shortcuts · optional update notice · max. 20 issues · Apache 2.0.
+Multiple stopwatches · time you already logged today (per issue and in total) · *Log & start again* · reorder by drag and drop (press and hold a card) or ▲▼ · pause others when one starts · edit time · remaining-estimate adjustment (auto / leave / set to / reduce by) · post the note as worklog comment, separate comment, or both · move an issue to e.g. *In Progress* when its timer starts · pause on lock · choose what happens on exit · keyboard shortcuts · optional update notice · max. 20 issues · Apache 2.0.
 
 ---
 
@@ -133,7 +133,10 @@ Multiple stopwatches · pause others when one starts · edit time · remaining-e
 - Config and timers live in `~/.config/jirastopwatch-nextgen` (Linux), `%AppData%\jirastopwatch-nextgen` (Windows) or `~/Library/Application Support/jirastopwatch-nextgen` (macOS).
 
 ## Not included (compared with the original)
-System-tray icon / minimise-to-tray and the diagnostic log file. The app runs in a browser window, which cannot create a tray icon; the mini window and the running time in the window title cover the same need.
+The diagnostic log file, and a tray/menu-bar icon on macOS (Windows and Linux have one: see below).
+
+## Tray icon
+On Windows and on Linux desktops with a status-notifier tray (KDE, XFCE, Cinnamon, GNOME with the AppIndicator extension) the app adds a notification-area icon. Click it to open the window; the tooltip shows the running timer, and the menu has *Open*, *Pause all timers* and *Quit*. With a tray icon, closing the window keeps the app (and your timers) running in the tray; use *Quit* to exit. Without a tray, closing the window quits as before.
 
 ## Development
 ```bash

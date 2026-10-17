@@ -35,7 +35,7 @@ JiraStopWatch NextGen بر پایه‌ی هسته‌ی پروژه‌ی متن‌
 ### مک
 ۱. فایل `jirastopwatch-nextgen-macos-arm64.zip` (مک‌های Apple Silicon: M1 تا M4) یا `…-macos-amd64.zip` (مک اینتل) را دانلود کنید.
 ۲. زیپ را باز کنید و برنامه‌ی **Jira StopWatch NextGen** را به پوشه‌ی **Applications** بکشید.
-۳. فقط بار اول: چون برنامه notarize نشده، macOS جلوی آن را می‌گیرد. یک بار آن را باز کنید، بعد به **System Settings ← Privacy & Security ← Open Anyway** بروید. (در macOS قدیمی‌تر: روی برنامه راست‌کلیک ← **Open**.)
+۳. فقط بار اول: برنامه امضای ad-hoc دارد ولی notarize نشده (که حساب پولی Apple Developer می‌خواهد)، برای همین macOS درباره‌ی «توسعه‌دهنده‌ی ناشناس» هشدار می‌دهد. یک بار آن را باز کنید، بعد به **System Settings ← Privacy & Security ← Open Anyway** بروید. (در macOS قدیمی‌تر: روی برنامه راست‌کلیک ← **Open**.) اگر macOS نوشت برنامه «damaged» است، یک بار این را اجرا کنید: `xattr -dr com.apple.quarantine "/Applications/Jira StopWatch NextGen.app"`.
 
 ### لینوکس
 - **اوبونتو / دبیان / مینت:** فایل `jirastopwatch-nextgen-linux-amd64.deb` (یا `…-arm64.deb`) را دانلود کنید، روی آن دوبار کلیک کنید و در نرم‌افزار سنتر **Install** بزنید.
@@ -136,6 +136,9 @@ go build -o jirastopwatch-nextgen .        # نیاز به Go 1.24 به بالا
 ## درباره‌ی برنامه‌نویس
 ساخته و نگهداری‌شده توسط **فرهاد رضوانی (Farhad Rezvani)** — برنامه‌نویس موبایل (تخصص اصلی: Flutter)، همچنین با Go، Rust و C# و پایگاه‌داده‌های SQL و PostgreSQL.
 گیت‌هاب: [@farhadrezvani7](https://github.com/farhadrezvani7) · تلگرام: [@farhad_rezvani](https://t.me/farhad_rezvani)
+
+## آیکون سینی سیستم
+در ویندوز و در لینوکس‌هایی که سینی سیستم دارند (KDE، XFCE، Cinnamon، یا GNOME با افزونه‌ی AppIndicator) یک آیکون در ناحیه‌ی اعلان‌ها قرار می‌گیرد. با کلیک روی آن پنجره باز می‌شود، تولتیپ تایمر در حال اجرا را نشان می‌دهد و منو شامل *Open*، *Pause all timers* و *Quit* است. وقتی آیکون سینی هست، بستن پنجره برنامه و تایمرها را در سینی زنده نگه می‌دارد؛ برای خروج از *Quit* استفاده کنید. در مک (فعلاً) آیکون سینی وجود ندارد.
 
 ## پشتیبانی و ارتقا
 اگر مشکلی دارید یا ارتقایی روی پروژه لازم است، به تلگرام پیام بدهید: **[@farhad_rezvani](https://t.me/farhad_rezvani)**. می‌توانید در گیت‌هاب هم یک [issue](https://github.com/farhadrezvani7/jirastopwatch-nextgen/issues) باز کنید.

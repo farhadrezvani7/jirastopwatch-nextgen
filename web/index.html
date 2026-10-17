@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jira StopWatch NextGen</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='18' r='11' fill='%232f6fed'/><path d='M16 11v7l4 3' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round'/><rect x='13' y='3' width='6' height='3' rx='1' fill='%232f6fed'/></svg>">
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0071E3">
 <style>
 :root{
   /* light (default) */
@@ -58,7 +61,7 @@ a{color:var(--link)}
 
 /* app shell */
 #app{display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:auto 1fr;height:100%}
-header{grid-column:1/3;display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--nav)}
+header{grid-column:1/3;display:flex;align-items:center;gap:10px;padding:8px 20px;border-bottom:1px solid var(--line);background:var(--nav)}
 header .brand{font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
 header .brand i{width:10px;height:10px;border-radius:50%;background:var(--muted)}
 header .brand i.live{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 25%,transparent)}
@@ -75,31 +78,33 @@ header .brand i.live{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb
 .menu button:hover{background:var(--panel2)}
 .menu label.check{padding:8px 10px;margin:0}
 
-main{padding:20px;overflow:auto}
-.addrow{display:flex;gap:8px;margin-bottom:16px}
+main{padding:14px 20px;overflow:auto}
+.addrow{display:flex;gap:8px;margin-bottom:10px}
 .addrow input{flex:1}
 .empty{border:2px dashed var(--line);border-radius:16px;padding:48px 20px;text-align:center;color:var(--muted)}
 .empty b{display:block;color:var(--text);font-size:16px;margin-bottom:4px}
 
-.timer{display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;align-items:center;padding:14px 16px;margin-bottom:10px;border-radius:14px;
+.timer{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:8px 12px;margin-bottom:6px;border-radius:12px;
   background:var(--panel);border:1px solid var(--line);transition:border-color .15s, box-shadow .15s}
 .timer.running{border-color:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 18%,transparent)}
-.play{width:46px;height:46px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center}
+.play{width:36px;height:36px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center}
 .timer.running .play{background:var(--ok);color:#fff}
-.play svg{width:20px;height:20px;fill:currentColor}
+.play svg{width:16px;height:16px;fill:currentColor}
 .info{min-width:0}
-.keyline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.keyline{display:flex;gap:8px;align-items:center;min-width:0;overflow:hidden}
+.keyline>*{flex:none}.keyline .proj{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .key{font-weight:700;color:var(--link);text-decoration:none}
 .key:hover{text-decoration:underline}
 .pill{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--panel2);color:var(--muted);white-space:nowrap}
-.summary{text-align:start;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.summary{text-align:start;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+.pill.today{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok);font-weight:600}
 .proj{color:var(--muted);font-size:12px}
-.time{font-size:26px;font-weight:600;letter-spacing:-.02em;background:none;border:0;padding:4px 8px;border-radius:8px}
+.time{font-size:22px;font-weight:600;letter-spacing:-.02em;background:none;border:0;padding:2px 6px;border-radius:8px}
 .time:hover{background:var(--panel2)}
 .actions{display:flex;gap:6px}
-.actions button{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:8px 12px;font-weight:600}
+.actions button{border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:5px 10px;font-weight:600}
 .actions button:hover{border-color:var(--accent)}
-.actions .x{padding:8px 10px;color:var(--muted)}
+.actions .x{padding:5px 8px;color:var(--muted)}
 .actions .x:hover{color:var(--danger);border-color:var(--danger)}
 
 aside{border-inline-start:1px solid var(--line);background:var(--nav);display:flex;flex-direction:column;min-height:0}
@@ -143,24 +148,55 @@ aside{border-inline-start:1px solid var(--line);background:var(--nav);display:fl
 .tsearch{margin-bottom:12px}
 .updbar{display:flex;gap:10px;align-items:center;padding:10px 14px;margin-bottom:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--accent)}
 .updbar .iconbtn{margin-inline-start:auto;padding:2px 8px}
+.timer{-webkit-touch-callout:none}
+.timer.dragging{position:relative;z-index:10;box-shadow:var(--shadow),0 0 0 2px var(--accent);cursor:grabbing;user-select:none;-webkit-user-select:none;transition:none;opacity:.96}
+body.dragmode{user-select:none;-webkit-user-select:none;cursor:grabbing}
 .timer.sel{outline:2px solid var(--accent);outline-offset:-2px}
 .mv{display:flex;flex-direction:column;gap:2px}
-.mv button{border:1px solid var(--line);background:var(--panel2);border-radius:6px;font-size:9px;line-height:1;padding:3px 6px;color:var(--muted)}
+.mv button{border:1px solid var(--line);background:var(--panel2);border-radius:6px;font-size:9px;line-height:1;padding:2px 6px;color:var(--muted)}
 .mv button:hover{border-color:var(--accent);color:var(--text)}
 .timer{grid-template-columns:auto auto 1fr auto auto}
 .themebtn{display:inline-flex;align-items:center;justify-content:center;width:38px;height:36px;padding:0}
 .themebtn svg{display:block}
 .themewrap{position:absolute;inset-block-start:16px;inset-inline-end:16px}
 #login{position:relative}
-.modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.modal .foot{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:20px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:var(--text);color:var(--bg);padding:10px 16px;border-radius:12px;box-shadow:var(--shadow);max-width:80vw}
 .toast.bad{background:var(--danger);color:#fff}
 
+/* narrow windows: the issue list becomes a slide-over panel, everything else reflows */
+.asidebtn,.asideclose{display:none}
 @media (max-width:820px){
-  #app{grid-template-columns:1fr}
-  header{grid-column:1}
-  aside{display:none}
+  #app{grid-template-columns:minmax(0,1fr)}
+  header{grid-column:1;flex-wrap:wrap;gap:8px;padding:10px 14px}
+  .spacer{flex-basis:0}
+  main{padding:14px}
+  .asidebtn{display:inline-flex}
+  aside{position:fixed;inset-block:0;inset-inline-end:0;width:min(360px,100%);z-index:40;box-shadow:var(--shadow);
+    transform:translateX(100%);visibility:hidden;transition:transform .2s,visibility .2s}
+  [dir=rtl] aside{transform:translateX(-100%)}
+  body.aside-open aside{transform:none;visibility:visible}
+  .asideclose{display:block;margin:12px 12px 0;align-self:flex-end}
+}
+@media (max-width:600px){
+  .clock,.total span{display:none}
+  .login-card{padding:22px 18px}
+  .langsel{float:none;width:100%;margin:0 0 12px}
+  .themewrap{position:static;float:inline-end;margin-bottom:8px}
+  .timer{grid-template-columns:auto minmax(0,1fr);gap:6px 12px;padding:12px}
+  .timer .mv{display:none}
+  .timer .play{grid-column:1;grid-row:1/3}
+  .timer .info{grid-column:2;grid-row:1}
+  .timer .time{grid-column:2;grid-row:2;justify-self:start;font-size:20px;padding-inline-start:0}
+  .timer .actions{grid-column:1/-1;grid-row:3;flex-wrap:wrap}
+  .timer .actions button{flex:1}
+  .timer .actions .x{flex:0 0 auto}
+  .addrow{flex-wrap:wrap}
+  .modal{padding:18px}
+  .modal .row{grid-template-columns:1fr}
+  #toast{left:12px;right:12px;bottom:12px;transform:none}
+  .toast{max-width:100%}
 }
 </style>
 </head>
@@ -206,7 +242,9 @@ aside{border-inline-start:1px solid var(--line);background:var(--nav);display:fl
     <div class="brand"><i id="live"></i> Jira StopWatch NextGen</div>
     <div class="spacer"></div>
     <div class="clock mono" id="clock" dir="ltr" style="color:var(--muted)"></div>
+    <div class="total" id="todayBox" data-tip="hdr.todayTip"><span data-i18n="hdr.today"></span> <b class="mono" id="todayTotal">–</b></div>
     <div class="total"><span data-i18n="hdr.total"></span> <b class="mono" id="total">0m</b></div>
+    <button class="iconbtn asidebtn themebtn" id="asideBtn" type="button" data-tip="tab.recent" aria-label="Issues"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <button class="iconbtn hidden" id="miniBtn" type="button" data-tip="mini.tip">⧉</button>
     <button class="iconbtn themebtn" data-themebtn type="button"></button>
     <button class="iconbtn" id="pauseAll" data-i18n="hdr.pauseAll"></button>
@@ -235,6 +273,7 @@ aside{border-inline-start:1px solid var(--line);background:var(--nav);display:fl
   </main>
 
   <aside>
+    <button class="iconbtn asideclose" id="asideClose" type="button" aria-label="Close">✕</button>
     <div class="tabs" id="tabs">
       <button data-src="recent" class="on" data-i18n="tab.recent"></button>
       <button data-src="assigned" data-i18n="tab.assigned"></button>
@@ -409,6 +448,20 @@ function updateClock() {
 let timers = [], fetchedAt = 0, site = "", me = null, pauseOthers = true;
 const elapsed = x => x.elapsedSec + (x.running ? (Date.now() - fetchedAt) / 1000 : 0);
 
+// What the user has logged on Jira today (all issues, and per issue).
+let todayByKey = {};
+async function fetchToday() {
+  if ($("#app").classList.contains("hidden")) return;
+  try {
+    const r = await api("GET", "/api/today");
+    todayByKey = r.byKey || {};
+    $("#todayTotal").textContent = fmt(r.total);
+    renderTimers();
+  } catch {}
+}
+setInterval(fetchToday, 120000);
+window.addEventListener("focus", fetchToday);
+
 async function refresh() {
   const s = await api("GET", "/api/state");
   timers = s.timers; pauseOthers = s.pauseOthers; zoneInfo = s.zone; fetchedAt = Date.now();
@@ -473,6 +526,7 @@ $("#loginForm").addEventListener("submit", async e => {
 });
 
 async function enterApp(user, sess) {
+  todayByKey = {}; $("#todayTotal").textContent = "–";
   me = user; site = sess.site; pauseOthers = sess.pauseOthers; prefs = sess.prefs; clock = sess.time;
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
@@ -483,6 +537,7 @@ async function enterApp(user, sess) {
   $("#checkUpdate").classList.toggle("hidden", !prefs.updateEnabled);
   await applyI18n();
   await refresh();
+  fetchToday();
   loadList();
   setTimeout(clockNotice, 700);
   setTimeout(checkUpdateBanner, 4000);
@@ -513,6 +568,7 @@ $("#timerSearch").oninput = e => { timerQuery = e.target.value; renderTimers(); 
 const matchesTimer = x => !timerQuery.trim() || norm([x.key, x.summary, x.project, x.status].join(" ")).includes(norm(timerQuery.trim()));
 
 function renderTimers() {
+  if (dragging) return;
   const box = $("#timers");
   box.replaceChildren();
   $("#timerSearch").classList.toggle("hidden", timers.length < 5);
@@ -529,7 +585,8 @@ function renderTimers() {
 
     const link = el("a", {className: "key", textContent: x.key, href: `${site}/browse/${x.key}`, target: "_blank", rel: "noopener", dir: "ltr"});
     const info = el("div", {className: "info"},
-      el("div", {className: "keyline"}, link, el("span", {className: "pill", textContent: x.status, dir: "auto"}), el("span", {className: "proj", textContent: x.project, dir: "auto"})),
+      el("div", {className: "keyline"}, link, el("span", {className: "pill", textContent: x.status, dir: "auto"}), el("span", {className: "proj", textContent: x.project, dir: "auto"}),
+        todayByKey[x.key] ? el("span", {className: "pill today", textContent: t("timer.today", {0: fmt(todayByKey[x.key])}), title: t("timer.todayTip")}) : ""),
       el("div", {className: "summary", dir: "auto", textContent: x.summary, title: x.summary}));
 
     const time = el("button", {className: "time mono", title: t("timer.editTip"), dir: "ltr"});
@@ -553,6 +610,67 @@ function renderTimers() {
   }
   tick();
 }
+
+/* Drag and drop: press and hold a card (not its buttons), then drag it to a new place. */
+let dragging = null;
+(() => {
+  const box = $("#timers"), HOLD = 350, SLOP = 8;
+  let pend = null, swallowClick = false;
+  const cancelPending = () => { if (pend) { clearTimeout(pend.timer); pend = null; } };
+  const drop = async ok => {
+    const d = dragging; if (!d) return;
+    dragging = null;
+    d.card.classList.remove("dragging"); d.card.style.transform = ""; document.body.classList.remove("dragmode");
+    try { d.card.releasePointerCapture(d.id); } catch {}
+    if (!ok) { renderTimers(); return; }
+    const prev = d.card.previousElementSibling;
+    selKey = d.card.dataset.key;
+    await act(`/api/timers/${d.card.dataset.key}/move`, "POST", {after: prev ? prev.dataset.key : ""});
+  };
+  // lay the card at the pointer; swap with a neighbour once its middle passes that neighbour's middle
+  const follow = y => {
+    const d = dragging, card = d.card;
+    card.style.transform = `translateY(${y - d.startY}px)`;
+    for (;;) {
+      const r = card.getBoundingClientRect(), mid = r.top + r.height / 2;
+      const prev = card.previousElementSibling, next = card.nextElementSibling;
+      let other = null, before = false;
+      if (prev) { const pr = prev.getBoundingClientRect(); if (mid < pr.top + pr.height / 2) { other = prev; before = true; } }
+      if (!other && next) { const nr = next.getBoundingClientRect(); if (mid > nr.top + nr.height / 2) other = next; }
+      if (!other) break;
+      const visual = r.top;
+      box.insertBefore(card, before ? other : other.nextSibling);
+      card.style.transform = "";
+      d.startY = y - (visual - card.getBoundingClientRect().top);
+      card.style.transform = `translateY(${y - d.startY}px)`;
+    }
+    const m = $("main").getBoundingClientRect();
+    if (y < m.top + 40) $("main").scrollBy(0, -12); else if (y > m.bottom - 40) $("main").scrollBy(0, 12);
+  };
+  box.addEventListener("pointerdown", e => {
+    const card = e.target.closest(".timer");
+    if (!card || (e.pointerType === "mouse" && e.button !== 0) || e.target.closest("button,a,input,textarea,select") || dragging) return;
+    cancelPending();
+    pend = {x: e.clientX, y: e.clientY, id: e.pointerId, card, timer: setTimeout(() => {
+      const p = pend; pend = null;
+      dragging = {card: p.card, id: p.id, startY: p.y, lastY: p.y};
+      try { p.card.setPointerCapture(p.id); } catch {}
+      p.card.classList.add("dragging"); document.body.classList.add("dragmode");
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, HOLD)};
+  });
+  box.addEventListener("pointermove", e => {
+    if (pend && Math.hypot(e.clientX - pend.x, e.clientY - pend.y) > SLOP) cancelPending();
+    if (dragging && e.pointerId === dragging.id) { dragging.lastY = e.clientY; follow(e.clientY); }
+  });
+  const end = ok => e => { cancelPending(); if (dragging && e.pointerId === dragging.id) { swallowClick = true; setTimeout(() => swallowClick = false, 0); drop(ok); } };
+  box.addEventListener("pointerup", end(true));
+  box.addEventListener("pointercancel", end(false));
+  box.addEventListener("click", e => { if (swallowClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+  box.addEventListener("contextmenu", e => { if (pend || dragging) e.preventDefault(); });
+  document.addEventListener("touchmove", e => { if (dragging) e.preventDefault(); }, {passive: false});
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && dragging) drop(false); });
+})();
 
 function tick() {
   let total = 0, any = false;
@@ -656,16 +774,20 @@ async function logDialog(x) {
     field(t("log.comment"), comment), field(t("log.status"), trans),
     field(t("est.label"), est), estVal);
   const submit = el("button", {type: "submit", className: "btn", textContent: t("log.btn")});
-  const {close, form} = modal(t("log.title"), x.key + " — " + x.summary, body, close => [el("button", {type: "button", className: "btn ghost", textContent: t("btn.cancel"), onclick: () => { flushDraft(); close(); }}), submit]);
-  form.onsubmit = async e => {
-    e.preventDefault(); clearTimeout(saveT); submit.disabled = true; submit.textContent = t("log.posting");
+  const again = el("button", {type: "button", className: "btn", textContent: t("log.restart"), title: t("log.restart")});
+  const {close, form} = modal(t("log.title"), x.key + " — " + x.summary, body, close => [el("button", {type: "button", className: "btn ghost", textContent: t("btn.cancel"), onclick: () => { flushDraft(); close(); }}), again, submit]);
+  const doLog = async restart => {
+    clearTimeout(saveT); submit.disabled = again.disabled = true; submit.textContent = t("log.posting");
     try {
       const r = await api("POST", `/api/timers/${x.key}/log`, {
         time: time.value, started: started.value, comment: comment.value, transition: trans.value,
         estimate: est.value, estimateValue: estVal.value});
-      close(); toast((r.warning ? tr(r.warning) : t("log.done", {time: time.value, key: x.key})) + `  ·  ${started.value.replace("T", " ")}${zoneInfo ? " " + zoneInfo.name : ""}`, !!r.warning); refresh();
-    } catch (ex) { toast(ex.message, true); submit.disabled = false; submit.textContent = t("log.btn"); }
+      if (restart) await api("POST", `/api/timers/${x.key}/start`);
+      close(); toast((r.warning ? tr(r.warning) : t("log.done", {time: time.value, key: x.key})) + `  ·  ${started.value.replace("T", " ")}${zoneInfo ? " " + zoneInfo.name : ""}`, !!r.warning); refresh(); fetchToday();
+    } catch (ex) { toast(ex.message, true); submit.disabled = again.disabled = false; submit.textContent = t("log.btn"); }
   };
+  form.onsubmit = e => { e.preventDefault(); doLog(false); };
+  again.onclick = () => { if (form.reportValidity()) doLog(true); };
   comment.focus();
   api("GET", `/api/issues/${x.key}/estimate`).then(r => {
     if (!r.text) return;
@@ -865,6 +987,9 @@ document.addEventListener("paste", e => {
 
 /* ---------- mini window: Document Picture-in-Picture is an always-on-top window (Chrome/Edge 116+) ---------- */
 let mini = null;
+$("#asideBtn").onclick = () => document.body.classList.toggle("aside-open");
+$("#asideClose").onclick = () => document.body.classList.remove("aside-open");
+document.addEventListener("keydown", e => { if (e.key === "Escape") document.body.classList.remove("aside-open"); });
 if ("documentPictureInPicture" in window) $("#miniBtn").classList.remove("hidden");
 $("#miniBtn").onclick = async () => {
   if (mini) { mini.close(); return; }

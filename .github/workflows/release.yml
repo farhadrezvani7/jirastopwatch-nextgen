@@ -5,7 +5,7 @@ on:
 permissions:
   contents: write
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +21,64 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}" UPDATE_REPO="${GITHUB_REPOSITORY}" ./build-all.sh
       - name: Check macOS binaries can start
         run: python3 scripts/check-macho.py dist/jirastopwatch-nextgen-darwin-amd64 dist/jirastopwatch-nextgen-darwin-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # Signs the macOS app (ad-hoc, no Apple account needed) so it is a well-formed signed bundle:
+  # Gatekeeper then shows the ordinary "unidentified developer" prompt (right-click > Open)
+  # instead of "is damaged and can't be opened".
+  sign-macos:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Ad-hoc sign binaries and .app bundles
+        run: |
+          cd dist
+          for arch in amd64 arm64; do
+            chmod +x jirastopwatch-nextgen-darwin-$arch
+            codesign --force -s - jirastopwatch-nextgen-darwin-$arch
+            rm -rf app && mkdir app
+            ditto -x -k jirastopwatch-nextgen-macos-$arch.zip app
+            cp jirastopwatch-nextgen-darwin-$arch "app/Jira StopWatch NextGen.app/Contents/MacOS/jirastopwatch-nextgen"
+            codesign --force --deep -s - "app/Jira StopWatch NextGen.app"
+            codesign --verify --deep --strict "app/Jira StopWatch NextGen.app"
+            rm jirastopwatch-nextgen-macos-$arch.zip
+            ditto -c -k --keepParent "app/Jira StopWatch NextGen.app" jirastopwatch-nextgen-macos-$arch.zip
+            rm -rf app
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: |
+            dist/jirastopwatch-nextgen-darwin-*
+            dist/jirastopwatch-nextgen-macos-*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [build, sign-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-macos
+          path: dist
+      - name: Refresh checksums (the macOS files changed when signed)
+        run: |
+          cd dist
+          rm -f SHA256SUMS.txt
+          sha256sum jirastopwatch-nextgen-* > SHA256SUMS.txt
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --title "$GITHUB_REF_NAME"
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --title "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"

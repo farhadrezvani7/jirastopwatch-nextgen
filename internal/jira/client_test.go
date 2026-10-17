@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestLoginRedirectAndHTMLAreAuthFailures(t *testing.T) {
@@ -36,5 +37,34 @@ func TestRemainingEstimate(t *testing.T) {
 	e, err := New(srv.URL, ModeBasic, "u", "p").Remaining(context.Background(), "A-1")
 	if err != nil || e.Text != "2h" || e.Seconds != 7200 {
 		t.Errorf("%+v %v", e, err)
+	}
+}
+
+func TestWorklogsSincePagesAndFiltersByAuthorAndTime(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/api/2/search", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"issues":[{"key":"A-1","fields":{}}]}`))
+	})
+	mux.HandleFunc("/rest/api/2/issue/A-1/worklog", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("startAt") == "0" {
+			_, _ = w.Write([]byte(`{"total":3,"worklogs":[
+			 {"author":{"name":"me"},"started":"2026-10-17T09:00:00.000+0000","timeSpentSeconds":600},
+			 {"author":{"name":"other"},"started":"2026-10-17T09:00:00.000+0000","timeSpentSeconds":9999}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"total":3,"worklogs":[
+		 {"author":{"name":"me"},"started":"2026-10-17T10:00:00.000+0000","timeSpentSeconds":1200},
+		 {"author":{"name":"me"},"started":"2026-10-16T10:00:00.000+0000","timeSpentSeconds":5000}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	since := time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)
+	logs, err := New(srv.URL, ModeBasic, "u", "p").WorklogsSince(context.Background(), &User{Name: "me"}, since)
+	var sum int64
+	for _, l := range logs {
+		sum += l.Seconds
+	}
+	if err != nil || sum != 1800 {
+		t.Errorf("sum=%d err=%v logs=%+v", sum, err, logs)
 	}
 }

@@ -41,6 +41,11 @@ type server struct {
 
 	timers *timer.Manager
 
+	todayMu   sync.Mutex
+	todayAt   time.Time // when todayData was fetched
+	todayDay  string    // the date it is for
+	todayData map[string]any
+
 	lockPaused []string // timers paused by a session lock, for "resume on unlock"
 	update     updateInfo
 
@@ -67,6 +72,15 @@ func (s *server) handler() http.Handler {
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(sub)))
 	mux.HandleFunc("GET /zones.json", serveZones)
+	mux.HandleFunc("GET /icon.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(appIcon)
+	})
+	mux.HandleFunc("GET /manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/manifest+json")
+		_, _ = w.Write([]byte(`{"name":"Jira StopWatch NextGen","short_name":"StopWatch","start_url":"/","display":"standalone",` +
+			`"icons":[{"src":"/icon.png","sizes":"512x512","type":"image/png","purpose":"any"}]}`))
+	})
 
 	mux.HandleFunc("GET /api/ping", s.ping)
 	mux.HandleFunc("GET /api/session", s.session)
@@ -86,6 +100,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /api/timers/{key}/comment", s.setComment)
 	mux.HandleFunc("GET /api/update", s.updateStatus)
 	mux.HandleFunc("GET /api/started", s.startedFor)
+	mux.HandleFunc("GET /api/today", s.today)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
 	mux.HandleFunc("POST /api/timers/{key}/move", s.moveTimer)
@@ -291,6 +306,9 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.client, s.user, s.hoursPerDay = c, user, hpd
+	s.todayMu.Lock()
+	s.todayAt = time.Time{}
+	s.todayMu.Unlock()
 	s.serverOff, s.serverKnown = srvOff, srvKnown
 	s.cfg.Site, s.cfg.Mode, s.cfg.Email, s.cfg.Token = site, req.Mode, req.Email, ""
 	if req.Remember {
@@ -632,6 +650,9 @@ func (s *server) logWork(w http.ResponseWriter, r *http.Request) {
 		failErr(w, err)
 		return
 	}
+	s.todayMu.Lock()
+	s.todayAt = time.Time{} // totals are stale now
+	s.todayMu.Unlock()
 	// The worklog is saved; reset now so a failed transition can't cause double logging.
 	s.timers.Reset(key)
 	resp := map[string]any{"ok": true}
@@ -795,13 +816,20 @@ func (s *server) moveTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Dir int `json:"dir"`
+		Dir   int     `json:"dir"`
+		After *string `json:"after"` // drag and drop: place after this timer ("" = first)
 	}
-	if !decode(r, &req) || (req.Dir != -1 && req.Dir != 1) {
+	if !decode(r, &req) || (req.After == nil && req.Dir != -1 && req.Dir != 1) {
 		fail(w, 400, "err.badRequest")
 		return
 	}
-	if err := s.timers.Move(key, req.Dir); err != nil {
+	var err error
+	if req.After != nil {
+		err = s.timers.MoveAfter(key, *req.After)
+	} else {
+		err = s.timers.Move(key, req.Dir)
+	}
+	if err != nil {
 		fail(w, 404, err.Error())
 		return
 	}
@@ -936,4 +964,41 @@ func loadableZones(raw []byte) []byte {
 	}
 	b, _ := json.Marshal(out)
 	return b
+}
+
+// today answers how much the user has logged on Jira today (in the chosen zone), in total and per issue.
+func (s *server) today(w http.ResponseWriter, r *http.Request) {
+	c := s.jc(w)
+	if c == nil {
+		return
+	}
+	s.mu.RLock()
+	loc, me := s.cfg.Location(), s.user
+	s.mu.RUnlock()
+	now := time.Now().In(loc)
+	day := now.Format("2006-01-02")
+	s.todayMu.Lock()
+	defer s.todayMu.Unlock()
+	if s.todayDay == day && time.Since(s.todayAt) < 20*time.Second && s.todayData != nil {
+		writeJSON(w, 200, s.todayData)
+		return
+	}
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	logs, err := c.WorklogsSince(r.Context(), me, start)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	end := start.AddDate(0, 0, 1)
+	var total int64
+	by := map[string]int64{}
+	for _, l := range logs {
+		if l.Started.Before(end) {
+			total += l.Seconds
+			by[l.Key] += l.Seconds
+		}
+	}
+	s.todayData = map[string]any{"total": total, "byKey": by, "date": day}
+	s.todayDay, s.todayAt = day, time.Now()
+	writeJSON(w, 200, s.todayData)
 }

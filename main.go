@@ -71,9 +71,40 @@ func main() {
 		fmt.Println(url)
 		go func() { <-sig; finish() }()
 	} else if cmd := appWindow(url); cmd != nil {
-		go func() { _ = cmd.Wait(); finish() }()
-		go func() { <-sig; _ = cmd.Process.Kill() }()
-		s.setQuit(func() { _ = cmd.Process.Kill(); finish() })
+		// With a tray icon, closing the window keeps the app (and its timers) running in the
+		// tray; "Open" brings the window back and "Quit" ends everything. Without one, closing
+		// the window quits, as there would be no way to reopen it.
+		tray := trayAvailable()
+		var mu sync.Mutex
+		cmds := []*exec.Cmd{cmd}
+		killAll := func() {
+			mu.Lock()
+			defer mu.Unlock()
+			for _, c := range cmds {
+				_ = c.Process.Kill()
+			}
+		}
+		watch := func(c *exec.Cmd) {
+			_ = c.Wait()
+			if !tray {
+				finish()
+			}
+		}
+		go watch(cmd)
+		go func() { <-sig; killAll(); finish() }()
+		s.setQuit(func() { killAll(); finish() })
+		if tray {
+			go runTray(s, func() {
+				// A running window just takes focus (Chrome hands the request to it); otherwise a new one opens.
+				if c := appWindow(url); c != nil {
+					mu.Lock()
+					cmds = append(cmds, c)
+					mu.Unlock()
+					go watch(c)
+				}
+			}, func() { killAll(); finish() })
+			defer stopTray()
+		}
 	} else if openDefaultBrowser(url) {
 		// No app-mode browser: the page is in a normal tab, so quit once it stops pinging.
 		go func() { s.waitForPageGone(3 * time.Minute); finish() }()

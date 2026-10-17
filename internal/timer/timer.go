@@ -224,6 +224,38 @@ func (m *Manager) Move(key string, dir int) error {
 	return ErrNotFound
 }
 
+// MoveAfter puts key right after the timer named after ("" = first place), for drag and drop.
+func (m *Manager) MoveAfter(key, after string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	from := -1
+	for i, t := range m.timers {
+		if t.Key == key {
+			from = i
+		}
+	}
+	if from < 0 {
+		return ErrNotFound
+	}
+	item := m.timers[from]
+	rest := append(append([]*Timer{}, m.timers[:from]...), m.timers[from+1:]...)
+	at := 0
+	if after != "" {
+		at = -1
+		for i, t := range rest {
+			if t.Key == after {
+				at = i + 1
+			}
+		}
+		if at < 0 {
+			return ErrNotFound
+		}
+	}
+	m.timers = append(rest[:at], append([]*Timer{item}, rest[at:]...)...)
+	m.save()
+	return nil
+}
+
 // PauseRunning pauses every running timer and returns their keys.
 func (m *Manager) PauseRunning() []string {
 	m.mu.Lock()

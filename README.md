@@ -115,6 +115,7 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 - 🕒 **Jira server-clock aware** — Jira stores the exact moment, but its reports group days by the *server's* time zone. If that differs from yours (and from your Jira profile), the app tells you and lets you opt in to writing your local clock time on the server's clock so reports land on the right day; switch back in Settings any time (the app also offers it once the server's zone is fixed).
 - 🔑 **Stays signed in** — your token is kept in the system credential store and the app signs you in on launch.
 - 📊 **Logged today** — the header shows everything you have logged in Jira today (all issues, in your chosen time zone) and each card shows what you logged on that issue today, so even many worklogs on one ticket add up at a glance.
+- 📌 **Pin cards** — the pin icon next to an issue key keeps that card above all the others. Pinning is stored only in this app (not in Jira) and survives restarts. Pinned cards stay in their own block: new, started and dragged cards never push past them, ▲▼ and drag-and-drop only reorder within the block, and removing a pinned card asks first.
 - ⤴️ **Started timers jump to the top** — optional (Settings): a timer that starts moves to the top of the list by itself, so you never reorder by hand.
 - 🔁 **Log & start again** — a button in the log dialog books the worklog and immediately restarts the same issue's timer, no searching needed.
 - ✋ **Drag and drop** — press and hold a card, then drag it to a new place (▲▼ and `Ctrl+↑/↓` still work).

@@ -444,3 +444,57 @@ func TestLogWorkRetryDoesNotDuplicateAndCommentComesAfter(t *testing.T) {
 		t.Errorf("timer not freed after the retry: %v", g.Elapsed(time.Now()))
 	}
 }
+
+func TestPinEndpointAndStartOnTopRespectsPins(t *testing.T) {
+	s := newTestServer(t)
+	do := func(method, path, body string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Host = "127.0.0.1"
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, req)
+		return w.Code
+	}
+	for _, k := range []string{"C-3", "B-2", "A-1"} {
+		_ = s.timers.Add(k, "", "", "")
+	}
+	order := func() string {
+		out := ""
+		for _, x := range s.timers.Snapshot() {
+			out += x.Key
+			if x.Pinned {
+				out += "*"
+			}
+			out += " "
+		}
+		return out
+	}
+	if c := do("POST", "/api/timers/C-3/pin", `{"pinned":true}`); c != 200 || order() != "C-3* A-1 B-2 " {
+		t.Fatalf("pin: %d %s", c, order())
+	}
+	if do("POST", "/api/timers/C-3/pin", `{}`) != 400 || do("POST", "/api/timers/Z-9/pin", `{"pinned":true}`) != 404 {
+		t.Error("bad pin requests accepted")
+	}
+	// start-on-top: an unpinned timer goes just below the pinned ones; a pinned one is not moved
+	do("POST", "/api/settings", `{"startOnTop":true}`)
+	do("POST", "/api/timers/B-2/start", "")
+	if order() != "C-3* B-2 A-1 " {
+		t.Errorf("start-on-top with a pin: %s", order())
+	}
+	do("POST", "/api/timers/C-3/pin", `{"pinned":false}`)
+	do("POST", "/api/timers/C-3/pin", `{"pinned":true}`)
+	do("POST", "/api/timers/A-1/pin", `{"pinned":true}`) // C-3* A-1* B-2
+	do("POST", "/api/timers/A-1/start", "")
+	if order() != "C-3* A-1* B-2 " {
+		t.Errorf("starting a pinned timer reordered the pins: %s", order())
+	}
+	// the state the page gets carries the flag
+	req := httptest.NewRequest("GET", "/api/state", nil)
+	req.Host = "127.0.0.1"
+	req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, req)
+	if !strings.Contains(w.Body.String(), `"pinned":true`) {
+		t.Errorf("state lacks the pinned flag: %s", w.Body)
+	}
+}

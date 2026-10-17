@@ -21,6 +21,7 @@ type Timer struct {
 	RunningSince *time.Time    `json:"runningSince,omitempty"`
 	FirstStart   *time.Time    `json:"firstStart,omitempty"`
 	Comment      string        `json:"comment,omitempty"` // unsent worklog note, kept across restarts
+	Pinned       bool          `json:"pinned,omitempty"`  // kept above all unpinned timers (an app-side flag, unrelated to Jira)
 }
 
 func (t *Timer) Elapsed(now time.Time) time.Duration {
@@ -70,7 +71,63 @@ func Load(path string) *Manager {
 	m := &Manager{path: path, Now: time.Now}
 	// A damaged file (power cut mid-write) falls back to the last good copy; see fsutil.ReadJSON.
 	_, _ = fsutil.ReadJSON(path, &m.timers)
+	m.normalize()
 	return m
+}
+
+// normalize restores the one ordering rule pinning adds: every pinned timer comes before every
+// unpinned one (stable, so the user's order inside each group is kept). Only a hand-edited or
+// damaged file can break it; all operations below preserve it.
+func (m *Manager) normalize() {
+	out := make([]*Timer, 0, len(m.timers))
+	for _, t := range m.timers {
+		if t != nil && t.Pinned {
+			out = append(out, t)
+		}
+	}
+	for _, t := range m.timers {
+		if t != nil && !t.Pinned {
+			out = append(out, t)
+		}
+	}
+	m.timers = out
+}
+
+// pinned counts the pinned timers in list (they are always the first ones).
+func pinned(list []*Timer) int {
+	n := 0
+	for _, t := range list {
+		if t.Pinned {
+			n++
+		}
+	}
+	return n
+}
+
+// SetPinned pins or unpins a timer. A pinned timer goes to the end of the pinned block, an
+// unpinned one to the top of the unpinned block, so the visible position changes as little as possible.
+func (m *Manager) SetPinned(key string, on bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	from := -1
+	for i, t := range m.timers {
+		if t.Key == key {
+			from = i
+		}
+	}
+	if from < 0 {
+		return ErrNotFound
+	}
+	item := m.timers[from]
+	if item.Pinned == on {
+		return nil
+	}
+	rest := append(append([]*Timer{}, m.timers[:from]...), m.timers[from+1:]...)
+	at := pinned(rest)
+	item.Pinned = on
+	m.timers = append(rest[:at], append([]*Timer{item}, rest[at:]...)...)
+	m.save()
+	return nil
 }
 
 func (m *Manager) save() {
@@ -124,7 +181,9 @@ func (m *Manager) Add(key, summary, project, status string) error {
 		if len(m.timers) >= MaxTimers {
 			return ErrTooMany
 		}
-		m.timers = append([]*Timer{{Key: key, Summary: summary, Project: project, Status: status}}, m.timers...)
+		// newest first, but below the pinned timers
+		at := pinned(m.timers)
+		m.timers = append(m.timers[:at], append([]*Timer{{Key: key, Summary: summary, Project: project, Status: status}}, m.timers[at:]...)...)
 	}
 	m.save()
 	return nil
@@ -233,7 +292,8 @@ func (m *Manager) Move(key string, dir int) error {
 			continue
 		}
 		j := i + dir
-		if j >= 0 && j < len(m.timers) {
+		// a timer never steps over the pinned/unpinned boundary (use pin/unpin for that)
+		if j >= 0 && j < len(m.timers) && m.timers[j].Pinned == t.Pinned {
 			m.timers[i], m.timers[j] = m.timers[j], m.timers[i]
 			m.save()
 		}
@@ -268,6 +328,12 @@ func (m *Manager) MoveAfter(key, after string) error {
 		if at < 0 {
 			return ErrNotFound
 		}
+	}
+	// Pinned timers stay above unpinned ones: a drop is clamped into the item's own group.
+	if pc := pinned(rest); item.Pinned && at > pc {
+		at = pc
+	} else if !item.Pinned && at < pc {
+		at = pc
 	}
 	m.timers = append(rest[:at], append([]*Timer{item}, rest[at:]...)...)
 	m.save()

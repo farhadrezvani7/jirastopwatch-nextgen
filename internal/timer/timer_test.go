@@ -159,3 +159,120 @@ func TestSaveErrorIsReported(t *testing.T) {
 		t.Errorf("unexpected save error: %v", m2.SaveError())
 	}
 }
+
+func keys(m *Manager) string {
+	s := ""
+	for _, x := range m.Snapshot() {
+		s += x.Key
+		if x.Pinned {
+			s += "*"
+		}
+		s += " "
+	}
+	return s
+}
+
+// Pinning adds one rule (pinned timers are always above unpinned ones); every operation must keep it.
+func TestPinnedTimersStayOnTopInEveryOperation(t *testing.T) {
+	path := t.TempDir() + "/timers.json"
+	m := Load(path)
+	for _, k := range []string{"E-5", "D-4", "C-3", "B-2", "A-1"} { // Add puts the newest first: A-1 B-2 C-3 D-4 E-5
+		m.Add(k, "", "", "")
+	}
+	if got := keys(m); got != "A-1 B-2 C-3 D-4 E-5 " {
+		t.Fatalf("setup: %s", got)
+	}
+
+	// pin: goes to the end of the pinned block
+	m.SetPinned("C-3", true)
+	m.SetPinned("E-5", true)
+	if got := keys(m); got != "C-3* E-5* A-1 B-2 D-4 " {
+		t.Errorf("after pinning C and E: %s", got)
+	}
+	if m.SetPinned("C-3", true) != nil || keys(m) != "C-3* E-5* A-1 B-2 D-4 " {
+		t.Error("pinning twice changed something")
+	}
+	if m.SetPinned("Z-9", true) != ErrNotFound {
+		t.Error("pinning a missing timer")
+	}
+
+	// a new timer comes in below the pinned ones
+	m.Add("F-6", "", "", "")
+	if got := keys(m); got != "C-3* E-5* F-6 A-1 B-2 D-4 " {
+		t.Errorf("new timer must go below the pinned ones: %s", got)
+	}
+
+	// ▲▼ moves inside a group, never across the boundary
+	m.Move("E-5", -1)
+	if got := keys(m); got != "E-5* C-3* F-6 A-1 B-2 D-4 " {
+		t.Errorf("move inside the pinned group: %s", got)
+	}
+	m.Move("C-3", 1) // would step into the unpinned group: refused
+	m.Move("F-6", -1)
+	if got := keys(m); got != "E-5* C-3* F-6 A-1 B-2 D-4 " {
+		t.Errorf("a move crossed the boundary: %s", got)
+	}
+	m.Move("F-6", 1)
+	if got := keys(m); got != "E-5* C-3* A-1 F-6 B-2 D-4 " {
+		t.Errorf("move inside the unpinned group: %s", got)
+	}
+
+	// drag and drop is clamped to the dragged card's own group
+	m.MoveAfter("E-5", "D-4") // a pinned card dropped far below: it stays in the pinned block
+	if got := keys(m); got != "C-3* E-5* A-1 F-6 B-2 D-4 " {
+		t.Errorf("pinned card dropped among unpinned: %s", got)
+	}
+	m.MoveAfter("D-4", "") // an unpinned card dropped at the very top: just below the pinned ones
+	if got := keys(m); got != "C-3* E-5* D-4 A-1 F-6 B-2 " {
+		t.Errorf("unpinned card dropped on top: %s", got)
+	}
+	m.MoveAfter("B-2", "C-3") // unpinned dropped right after a pinned card
+	if got := keys(m); got != "C-3* E-5* B-2 D-4 A-1 F-6 " {
+		t.Errorf("unpinned card dropped after a pinned one: %s", got)
+	}
+	m.MoveAfter("E-5", "") // pinned dropped at the top
+	if got := keys(m); got != "E-5* C-3* B-2 D-4 A-1 F-6 " {
+		t.Errorf("pinned card dropped on top: %s", got)
+	}
+
+	// unpin: goes to the top of the unpinned block
+	m.SetPinned("E-5", false)
+	if got := keys(m); got != "C-3* E-5 B-2 D-4 A-1 F-6 " {
+		t.Errorf("after unpinning E: %s", got)
+	}
+	m.SetPinned("E-5", true)
+
+	// pinning survives a restart, the rest of the timer is untouched by it
+	m.Start("E-5", false)
+	m.SetElapsed("C-3", 5*time.Minute)
+	m.ResetAll() // "reset on exit" must not unpin
+	if got := keys(Load(path)); got != "C-3* E-5* B-2 D-4 A-1 F-6 " {
+		t.Errorf("after restart/reset: %s", got)
+	}
+
+	// removing a pinned timer leaves the rule intact; the limit counts pinned timers too
+	m.Remove("C-3")
+	if got := keys(m); got != "E-5* B-2 D-4 A-1 F-6 " {
+		t.Errorf("after removing a pinned timer: %s", got)
+	}
+	for i := 0; len(m.Snapshot()) < MaxTimers; i++ {
+		m.Add("K-"+string(rune('A'+i)), "", "", "")
+	}
+	if err := m.Add("OVER-1", "", "", ""); err != ErrTooMany {
+		t.Errorf("limit with pinned timers: %v", err)
+	}
+}
+
+// A damaged or hand-edited file may list unpinned timers before pinned ones: loading puts it right.
+func TestLoadRestoresPinnedFirstOrder(t *testing.T) {
+	path := t.TempDir() + "/timers.json"
+	os.WriteFile(path, []byte(`[{"key":"A-1"},{"key":"B-2","pinned":true},{"key":"C-3"},{"key":"D-4","pinned":true}]`), 0o600)
+	if got := keys(Load(path)); got != "B-2* D-4* A-1 C-3 " {
+		t.Errorf("order after load: %s", got)
+	}
+	// a file written before pinning existed has no flag at all: nothing is pinned, order unchanged
+	os.WriteFile(path, []byte(`[{"key":"A-1"},{"key":"B-2"}]`), 0o600)
+	if got := keys(Load(path)); got != "A-1 B-2 " {
+		t.Errorf("old file: %s", got)
+	}
+}

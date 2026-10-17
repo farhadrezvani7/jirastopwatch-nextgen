@@ -190,6 +190,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
 	mux.HandleFunc("POST /api/timers/{key}/move", s.moveTimer)
+	mux.HandleFunc("POST /api/timers/{key}/pin", s.pinTimer)
 	mux.HandleFunc("GET /api/issues/{key}/estimate", s.estimate)
 
 	mux.HandleFunc("GET /api/issues", s.issues)
@@ -564,6 +565,7 @@ type timerDTO struct {
 	Running    bool   `json:"running"`
 	Comment    string `json:"comment"`
 	StartedAt  string `json:"startedAt"` // local time in the chosen zone, for <input type=datetime-local>
+	Pinned     bool   `json:"pinned"`
 }
 
 func (s *server) state(w http.ResponseWriter, r *http.Request) {
@@ -575,7 +577,7 @@ func (s *server) state(w http.ResponseWriter, r *http.Request) {
 	out := make([]timerDTO, len(ts))
 	for i, t := range ts {
 		out[i] = timerDTO{t.Key, t.Summary, t.Project, t.Status,
-			int64(t.Elapsed(now).Seconds()), t.Running(), t.Comment, defaultStart(now, t.Elapsed(now)).In(loc).Format(localLayout)}
+			int64(t.Elapsed(now).Seconds()), t.Running(), t.Comment, defaultStart(now, t.Elapsed(now)).In(loc).Format(localLayout), t.Pinned}
 	}
 	_, off := now.In(loc).Zone()
 	writeJSON(w, 200, map[string]any{"timers": out, "pauseOthers": po, "saveError": s.timers.SaveError(),
@@ -647,8 +649,8 @@ func (s *server) startTimer(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err.Error())
 		return
 	}
-	if top {
-		_ = s.timers.MoveAfter(key, "") // "Move to the top when started" (Settings)
+	if g, ok := s.timers.Get(key); top && ok && !g.Pinned {
+		_ = s.timers.MoveAfter(key, "") // "Move to the top when started" (Settings): just below the pinned ones; pinned timers stay where the user put them
 	}
 	if c != nil && strings.TrimSpace(names) != "" {
 		go applyStartTransition(c, key, names)
@@ -979,6 +981,26 @@ func (s *server) moveTimer(w http.ResponseWriter, r *http.Request) {
 		err = s.timers.Move(key, req.Dir)
 	}
 	if err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// pinTimer pins or unpins a card. Pinning is kept only in this app (timers.json); Jira knows nothing of it.
+func (s *server) pinTimer(w http.ResponseWriter, r *http.Request) {
+	key, ok := reqKey(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Pinned *bool `json:"pinned"`
+	}
+	if !decode(r, &req) || req.Pinned == nil {
+		fail(w, 400, "err.badRequest")
+		return
+	}
+	if err := s.timers.SetPinned(key, *req.Pinned); err != nil {
 		fail(w, 404, err.Error())
 		return
 	}

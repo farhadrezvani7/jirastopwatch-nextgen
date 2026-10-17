@@ -160,6 +160,12 @@ aside{border-inline-start:1px solid var(--line);background:var(--nav);display:fl
 .timer{-webkit-touch-callout:none}
 .timer.dragging{position:relative;z-index:10;box-shadow:var(--sh-3),0 0 0 2px var(--accent);cursor:grabbing;user-select:none;-webkit-user-select:none;transition:none;opacity:.96}
 body.dragmode{user-select:none;-webkit-user-select:none;cursor:grabbing}
+.pinbtn{flex:none;border:0;background:none;padding:2px;border-radius:6px;color:var(--muted);opacity:.45;line-height:0}
+.pinbtn svg{transform:rotate(45deg)}
+.pinbtn:hover{opacity:1;color:var(--text)}
+.pinbtn.on{opacity:1;color:var(--accent)}
+.pinbtn.on svg{transform:none}
+.timer.pinned-last{margin-bottom:12px}
 .timer.sel{outline:2px solid var(--accent);outline-offset:-2px}
 .mv{display:flex;flex-direction:column;gap:2px}
 .mv button{border:1px solid var(--line);background:var(--panel2);border-radius:6px;font-size:calc(var(--fs)*0.6923);line-height:1;padding:2px 6px;color:var(--muted)}
@@ -608,11 +614,15 @@ $("#userBtn").onclick = () => {
 
 /* ---------- timers ---------- */
 const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const PIN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M9 3h6l-1 6 3 3v2h-5v7l-1 0v-7H6v-2l3-3z"/></svg>';
 const PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
 
 let selKey = "";   // timer the keyboard shortcuts act on
 const selected = () => timers.find(x => x.key === selKey) || timers[0];
 function select(k) { selKey = k; for (const c of document.querySelectorAll("#timers .timer")) c.classList.toggle("sel", c.dataset.key === k); }
+// A running or pinned card is not removed by accident: ask first.
+const confirmRemove = x => x.pinned ? confirm(t("timer.confirmRemovePinned")) : (!x.running || confirm(t("timer.confirmRemove")));
+async function setPinned(x) { await act(`/api/timers/${x.key}/pin`, "POST", {pinned: !x.pinned}); }
 async function move(key, dir) { selKey = key; await act(`/api/timers/${key}/move`, "POST", {dir}); }
 let timerQuery = "";
 $("#timerSearch").oninput = e => { timerQuery = e.target.value; renderTimers(); };
@@ -634,9 +644,11 @@ function renderTimers() {
     play.innerHTML = x.running ? PAUSE : PLAY;
     play.onclick = () => { selKey = x.key; act(`/api/timers/${x.key}/${x.running ? "pause" : "start"}`); };
 
+    const pinBtn = el("button", {type: "button", className: "pinbtn" + (x.pinned ? " on" : ""), title: t(x.pinned ? "timer.unpin" : "timer.pin"), ariaLabel: t(x.pinned ? "timer.unpin" : "timer.pin"), ariaPressed: String(!!x.pinned), innerHTML: PIN});
+    pinBtn.onclick = e => { e.stopPropagation(); setPinned(x); };
     const link = el("a", {className: "key", textContent: x.key, href: `${site}/browse/${x.key}`, target: "_blank", rel: "noopener", dir: "ltr"});
     const info = el("div", {className: "info"},
-      el("div", {className: "keyline"}, link, el("span", {className: "pill", textContent: x.status, dir: "auto"}), el("span", {className: "proj", textContent: x.project, dir: "auto"}),
+      el("div", {className: "keyline"}, pinBtn, link, el("span", {className: "pill", textContent: x.status, dir: "auto"}), el("span", {className: "proj", textContent: x.project, dir: "auto"}),
         todayByKey[x.key] ? el("span", {className: "pill today", textContent: t("timer.today", {0: fmt(todayByKey[x.key])}), title: t("timer.todayTip")}) : ""),
       el("div", {className: "summary", dir: "auto", textContent: x.summary, title: x.summary}));
 
@@ -652,11 +664,12 @@ function renderTimers() {
     const log = el("button", {textContent: t("timer.log"), title: t("timer.logTip") + " (Ctrl+L)"});
     log.onclick = () => logDialog(x);
     const rm = el("button", {className: "x", textContent: "✕", title: t("timer.removeTip") + " (Ctrl+Del)"});
-    rm.onclick = () => { if (!x.running || confirm(t("timer.confirmRemove"))) act(`/api/timers/${x.key}`, "DELETE"); };
+    rm.onclick = () => { if (confirmRemove(x)) act(`/api/timers/${x.key}`, "DELETE"); };
 
-    const card = el("div", {className: "timer" + (x.running ? " running" : "") + (x.key === selKey ? " sel" : "")}, mv, play, info, time, el("div", {className: "actions"}, log, reset, rm));
+    const card = el("div", {className: "timer" + (x.pinned ? " pinned" : "") + (x.pinned && !(timers[timers.indexOf(x) + 1] || {}).pinned ? " pinned-last" : "") + (x.running ? " running" : "") + (x.key === selKey ? " sel" : "")}, mv, play, info, time, el("div", {className: "actions"}, log, reset, rm));
     card.onmousedown = () => select(x.key);
     card.dataset.key = x.key;
+    card.dataset.pinned = x.pinned ? "1" : "";
     box.append(card);
   }
   tick();
@@ -688,7 +701,7 @@ let dragging = null;
       let other = null, before = false;
       if (prev) { const pr = prev.getBoundingClientRect(); if (mid < pr.top + pr.height / 2) { other = prev; before = true; } }
       if (!other && next) { const nr = next.getBoundingClientRect(); if (mid > nr.top + nr.height / 2) other = next; }
-      if (!other) break;
+      if (!other || other.dataset.pinned !== card.dataset.pinned) break;   // pinned cards stay above unpinned ones
       const visual = r.top;
       box.insertBefore(card, before ? other : other.nextSibling);
       card.style.transform = "";
@@ -1086,7 +1099,7 @@ document.addEventListener("keydown", e => {
     case "l": case "L": if (x) run(() => logDialog(x)); break;
     case "e": case "E": if (x) run(() => editTime(x)); break;
     case "r": case "R": if (x) run(() => act(`/api/timers/${x.key}/reset`)); break;
-    case "Delete": if (x) run(() => { if (!x.running || confirm(t("timer.confirmRemove"))) act(`/api/timers/${x.key}`, "DELETE"); }); break;
+    case "Delete": if (x) run(() => { if (confirmRemove(x)) act(`/api/timers/${x.key}`, "DELETE"); }); break;
     case "i": case "I": case "n": case "N": run(() => $("#addKey").focus()); break;
     case "o": case "O": if (x) run(() => window.open(`${site}/browse/${x.key}`, "_blank", "noopener")); break;
     case "c": case "C": if (x && !typing(e) && !getSelection().toString()) run(() => navigator.clipboard?.writeText(x.key)); break;

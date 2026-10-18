@@ -187,6 +187,8 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /api/started", s.startedFor)
 	mux.HandleFunc("POST /api/recovery", s.answerRecovery)
 	mux.HandleFunc("GET /api/browsers", s.browsers)
+	mux.HandleFunc("GET /api/queues/desks", s.queueDesks)
+	mux.HandleFunc("GET /api/queues", s.queues)
 	mux.HandleFunc("POST /api/open", s.openIssue)
 	mux.HandleFunc("GET /api/today", s.today)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
@@ -824,6 +826,10 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	if q.Get("src") == "queue" { // a Jira Service Management queue: its issues, read in two steps
+		s.queueIssues(w, r, c)
+		return
+	}
 	var jql string
 	switch q.Get("src") {
 	case "recent":
@@ -998,6 +1004,69 @@ func (s *server) moveTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+var digitsRe = regexp.MustCompile(`^\d+$`)
+
+// queueDesks lists the service projects (Jira Service Management) the user can see. A Jira without
+// them, or an account without access, simply has none and the page hides the Queues tab.
+func (s *server) queueDesks(w http.ResponseWriter, r *http.Request) {
+	c := s.jc(w)
+	if c == nil {
+		return
+	}
+	desks, err := c.ServiceDesks(r.Context())
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if desks == nil {
+		desks = []jira.Desk{}
+	}
+	writeJSON(w, 200, desks)
+}
+
+// queues lists the queues of one service project.
+func (s *server) queues(w http.ResponseWriter, r *http.Request) {
+	c := s.jc(w)
+	if c == nil {
+		return
+	}
+	desk := r.URL.Query().Get("desk")
+	if !digitsRe.MatchString(desk) {
+		fail(w, 400, "err.badRequest")
+		return
+	}
+	list, err := c.Queues(r.Context(), desk)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if list == nil {
+		list = []jira.Queue{}
+	}
+	writeJSON(w, 200, list)
+}
+
+// queueIssues returns one page of a queue's issues in the same shape as every other issue list.
+func (s *server) queueIssues(w http.ResponseWriter, r *http.Request, c *jira.Client) {
+	q := r.URL.Query()
+	desk, queue := q.Get("desk"), q.Get("queue")
+	if !digitsRe.MatchString(desk) || !digitsRe.MatchString(queue) {
+		fail(w, 400, "err.badRequest")
+		return
+	}
+	keys, next, err := c.QueueIssueKeys(r.Context(), desk, queue, 50, q.Get("cursor"))
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	issues, err := c.IssuesByKeys(r.Context(), keys)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"issues": issues, "next": next})
 }
 
 // browsers lists the browsers found on this computer, for the Settings picker.

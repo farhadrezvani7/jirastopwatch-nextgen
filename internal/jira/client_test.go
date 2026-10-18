@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -181,5 +182,75 @@ func TestIsMineIgnoresCaseOfNamesAndKeys(t *testing.T) {
 	}
 	if u.IsMine(Author{Key: "JIRAUSER1"}) {
 		t.Error("a different user was taken for me")
+	}
+}
+
+// Queues (Jira Service Management) must work with all three sign-in modes, page correctly, send the
+// experimental opt-in header, and a Jira without Service Management simply has none.
+func TestServiceDeskQueuesInAllThreeLoginModes(t *testing.T) {
+	for _, c := range []struct{ name, mode, id, secret, auth string }{
+		{"cloud", ModeCloud, "me@x.com", "tok", "Basic bWVAeC5jb206dG9r"},
+		{"pat", ModePAT, "", "pat1", "Bearer pat1"},
+		{"basic", ModeBasic, "me", "pw", "Basic bWU6cHc="},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				isQueueAPI := strings.HasPrefix(r.URL.Path, "/rest/servicedeskapi/")
+				if r.Header.Get("Authorization") != c.auth || (isQueueAPI && r.Header.Get("X-ExperimentalApi") != "opt-in") {
+					t.Errorf("%s: auth=%q experimental=%q", r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("X-ExperimentalApi"))
+				}
+				start := r.URL.Query().Get("start")
+				switch {
+				case r.URL.Path == "/rest/servicedeskapi/servicedesk":
+					_, _ = w.Write([]byte(`{"isLastPage":true,"values":[{"id":"20","projectKey":"HD","projectName":"HelpDesk"},{"id":"5","projectKey":"MIS","projectName":"MIS"}]}`))
+				case r.URL.Path == "/rest/servicedeskapi/servicedesk/20/queue" && start == "0":
+					_, _ = w.Write([]byte(`{"isLastPage":false,"values":[{"id":"425","name":"Support","issueCount":8}]}`))
+				case r.URL.Path == "/rest/servicedeskapi/servicedesk/20/queue":
+					_, _ = w.Write([]byte(`{"isLastPage":true,"values":[{"id":"400","name":"Other","issueCount":0}]}`))
+				case r.URL.Path == "/rest/servicedeskapi/servicedesk/20/queue/425/issue":
+					_, _ = w.Write([]byte(`{"isLastPage":false,"values":[{"key":"HD-2"},{"key":"HD-1"}]}`))
+				case strings.HasSuffix(r.URL.Path, "/search") || strings.HasSuffix(r.URL.Path, "/search/jql"):
+					if !strings.Contains(r.URL.Query().Get("jql"), `"HD-2","HD-1"`) {
+						t.Errorf("details query: %q", r.URL.Query().Get("jql"))
+					}
+					// Jira answers in its own order; the queue's order must win
+					_, _ = w.Write([]byte(`{"issues":[{"key":"HD-1","fields":{"summary":"one","project":{"name":"P"},"status":{"name":"Open"}}},{"key":"HD-2","fields":{"summary":"two","project":{"name":"P"},"status":{"name":"Open"}}}]}`))
+				default:
+					w.WriteHeader(404)
+				}
+			}))
+			defer srv.Close()
+			cl := New(srv.URL, c.mode, c.id, c.secret)
+			desks, err := cl.ServiceDesks(context.Background())
+			if err != nil || len(desks) != 2 || desks[0].Key != "HD" || desks[0].Name != "HelpDesk" {
+				t.Fatalf("desks: %+v %v", desks, err)
+			}
+			qs, err := cl.Queues(context.Background(), "20")
+			if err != nil || len(qs) != 2 || qs[0].Count != 8 || qs[1].Name != "Other" {
+				t.Fatalf("queues (paged): %+v %v", qs, err)
+			}
+			keys, next, err := cl.QueueIssueKeys(context.Background(), "20", "425", 2, "")
+			if err != nil || len(keys) != 2 || next != "2" {
+				t.Fatalf("queue keys: %v next=%q %v", keys, next, err)
+			}
+			issues, err := cl.IssuesByKeys(context.Background(), keys)
+			if err != nil || len(issues) != 2 || issues[0].Key != "HD-2" || issues[1].Summary != "one" {
+				t.Errorf("details in queue order: %+v %v", issues, err)
+			}
+			if got, _ := cl.IssuesByKeys(context.Background(), []string{`X-1") OR (1=1`}); len(got) != 0 {
+				t.Error("an invalid key reached the query")
+			}
+		})
+	}
+}
+
+func TestJiraWithoutServiceManagementHasNoQueues(t *testing.T) {
+	for _, status := range []int{404, 403, 401} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
+		desks, err := New(srv.URL, ModePAT, "", "x").ServiceDesks(context.Background())
+		srv.Close()
+		if err != nil || len(desks) != 0 {
+			t.Errorf("status %d: desks=%v err=%v (want none, no error)", status, desks, err)
+		}
 	}
 }

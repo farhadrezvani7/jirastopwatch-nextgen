@@ -91,6 +91,7 @@ Object.assign(STR.en, {
   "timer.pin": "Pin to the top", "timer.unpin": "Unpin", "timer.confirmRemovePinned": "This card is pinned. Remove it anyway?",
   "hdr.pending": "Not logged yet", "hdr.pendingTip": "Time on your timer cards that has not been logged to Jira yet",
   "set.browser": "Open Jira issues in", "set.browserDefault": "System default browser", "err.openBrowser": "The chosen browser could not be started, so the default one was used.",
+  "tab.queues": "Queues", "queue.none": "No queues found.",
   "set.fontSize": "Base font size", "set.shadows": "Show shadows",
   "hdr.today": "Logged today", "hdr.todayTip": "Everything you logged on Jira today, on all issues",
   "timer.today": "Today {0}", "timer.todayTip": "What you logged on this issue today",

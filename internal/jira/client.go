@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -123,6 +125,11 @@ func New(base, mode, identity, secret string) *Client {
 func (c *Client) cloud() bool { return c.Mode == ModeCloud || IsCloudHost(c.Base) }
 
 func (c *Client) do(ctx context.Context, method, path string, q url.Values, body, out any) error {
+	return c.doH(ctx, method, path, q, body, out, nil)
+}
+
+// doH is do with extra request headers.
+func (c *Client) doH(ctx context.Context, method, path string, q url.Values, body, out any, h http.Header) error {
 	u := c.Base + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
@@ -142,6 +149,9 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, body
 		req.SetBasicAuth(c.Identity, c.Secret)
 	}
 	req.Header.Set("Accept", "application/json")
+	for k, v := range h {
+		req.Header[k] = v
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -171,10 +181,14 @@ func errMessage(status int, data []byte) string {
 	var e struct {
 		ErrorMessages []string          `json:"errorMessages"`
 		Errors        map[string]string `json:"errors"`
+		ErrorMessage  string            `json:"errorMessage"` // Jira Service Management's REST API
 	}
 	_ = json.Unmarshal(data, &e)
 	var parts []string
 	parts = append(parts, e.ErrorMessages...)
+	if e.ErrorMessage != "" {
+		parts = append(parts, e.ErrorMessage)
+	}
 	for _, v := range e.Errors {
 		parts = append(parts, v)
 	}
@@ -519,4 +533,146 @@ func (c *Client) HasWorklog(ctx context.Context, me *User, key string, started t
 		}
 	}
 	return false, nil
+}
+
+// ---- Jira Service Management queues ----
+//
+// Queues belong to service projects (Jira Service Management). The same REST API exists on Cloud and on
+// Server/Data Center. Its queue calls are marked experimental and need an opt-in header.
+
+var experimental = http.Header{http.CanonicalHeaderKey("X-ExperimentalApi"): {"opt-in"}}
+
+// Desk is a service project.
+type Desk struct {
+	ID   string `json:"id"`
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
+// Queue is one agent queue of a service project.
+type Queue struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// ServiceDesks lists the service projects the user can see. A Jira without Jira Service Management
+// (or without access to it) has none: that is an empty list, not an error.
+func (c *Client) ServiceDesks(ctx context.Context) ([]Desk, error) {
+	var out []Desk
+	for start, pages := 0, 0; pages < 20; pages++ {
+		var res struct {
+			Values []struct {
+				ID          string `json:"id"`
+				ProjectKey  string `json:"projectKey"`
+				ProjectName string `json:"projectName"`
+			} `json:"values"`
+			IsLastPage bool `json:"isLastPage"`
+		}
+		q := url.Values{"start": {fmt.Sprint(start)}, "limit": {"50"}}
+		if err := c.doH(ctx, "GET", "/rest/servicedeskapi/servicedesk", q, nil, &res, experimental); err != nil {
+			var ae *APIError
+			if errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403 || ae.Status == 404) {
+				return out, nil
+			}
+			return nil, err
+		}
+		for _, v := range res.Values {
+			out = append(out, Desk{v.ID, v.ProjectKey, v.ProjectName})
+		}
+		start += len(res.Values)
+		if res.IsLastPage || len(res.Values) == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// Queues lists a service project's queues with their issue counts.
+func (c *Client) Queues(ctx context.Context, deskID string) ([]Queue, error) {
+	var out []Queue
+	for start, pages := 0, 0; pages < 20; pages++ {
+		var res struct {
+			Values []struct {
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				IssueCount int    `json:"issueCount"`
+			} `json:"values"`
+			IsLastPage bool `json:"isLastPage"`
+		}
+		q := url.Values{"start": {fmt.Sprint(start)}, "limit": {"50"}, "includeCount": {"true"}}
+		if err := c.doH(ctx, "GET", "/rest/servicedeskapi/servicedesk/"+url.PathEscape(deskID)+"/queue", q, nil, &res, experimental); err != nil {
+			return nil, err
+		}
+		for _, v := range res.Values {
+			out = append(out, Queue{v.ID, v.Name, v.IssueCount})
+		}
+		start += len(res.Values)
+		if res.IsLastPage || len(res.Values) == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// QueueIssueKeys returns one page of the issue keys in a queue (in the queue's own order) and the
+// cursor of the next page ("" at the end). The queue call only returns the columns the queue shows,
+// so the caller reads the details (summary, status...) with IssuesByKeys.
+func (c *Client) QueueIssueKeys(ctx context.Context, deskID, queueID string, max int, cursor string) ([]string, string, error) {
+	start := 0
+	if cursor != "" {
+		if n, err := strconv.Atoi(cursor); err == nil && n > 0 {
+			start = n
+		}
+	}
+	var res struct {
+		Values []struct {
+			Key string `json:"key"`
+		} `json:"values"`
+		IsLastPage bool `json:"isLastPage"`
+	}
+	q := url.Values{"start": {fmt.Sprint(start)}, "limit": {fmt.Sprint(max)}}
+	path := "/rest/servicedeskapi/servicedesk/" + url.PathEscape(deskID) + "/queue/" + url.PathEscape(queueID) + "/issue"
+	if err := c.doH(ctx, "GET", path, q, nil, &res, experimental); err != nil {
+		return nil, "", err
+	}
+	keys := make([]string, 0, len(res.Values))
+	for _, v := range res.Values {
+		keys = append(keys, v.Key)
+	}
+	next := ""
+	if !res.IsLastPage && len(keys) > 0 {
+		next = fmt.Sprint(start + len(keys))
+	}
+	return keys, next, nil
+}
+
+var issueKeyRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*-\d+$`)
+
+// IssuesByKeys reads summary, project and status for the given issues and returns them in the order of keys.
+func (c *Client) IssuesByKeys(ctx context.Context, keys []string) ([]Issue, error) {
+	var ok []string
+	for _, k := range keys {
+		if issueKeyRe.MatchString(k) { // the keys come from Jira, but never put anything else into a query
+			ok = append(ok, `"`+k+`"`)
+		}
+	}
+	if len(ok) == 0 {
+		return []Issue{}, nil
+	}
+	found, err := c.Search(ctx, "key in ("+strings.Join(ok, ",")+")", len(ok))
+	if err != nil {
+		return nil, err
+	}
+	byKey := map[string]Issue{}
+	for _, i := range found {
+		byKey[strings.ToUpper(i.Key)] = i
+	}
+	out := make([]Issue, 0, len(keys))
+	for _, k := range keys {
+		if i, ok := byKey[strings.ToUpper(k)]; ok {
+			out = append(out, i)
+		}
+	}
+	return out, nil
 }

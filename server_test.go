@@ -498,3 +498,58 @@ func TestPinEndpointAndStartOnTopRespectsPins(t *testing.T) {
 		t.Errorf("state lacks the pinned flag: %s", w.Body)
 	}
 }
+
+func TestQueueEndpoints(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/api/2/myself":
+			_, _ = w.Write([]byte(`{"displayName":"T","name":"me","key":"U1"}`))
+		case r.URL.Path == "/rest/servicedeskapi/servicedesk":
+			_, _ = w.Write([]byte(`{"isLastPage":true,"values":[{"id":"20","projectKey":"HD","projectName":"HelpDesk"}]}`))
+		case r.URL.Path == "/rest/servicedeskapi/servicedesk/20/queue":
+			_, _ = w.Write([]byte(`{"isLastPage":true,"values":[{"id":"425","name":"Support","issueCount":2}]}`))
+		case r.URL.Path == "/rest/servicedeskapi/servicedesk/20/queue/425/issue":
+			_, _ = w.Write([]byte(`{"isLastPage":true,"values":[{"key":"HD-9"},{"key":"HD-3"}]}`))
+		case r.URL.Path == "/rest/api/2/search":
+			_, _ = w.Write([]byte(`{"issues":[{"key":"HD-3","fields":{"summary":"c","project":{"name":"P"},"status":{"name":"Open"}}},{"key":"HD-9","fields":{"summary":"n","project":{"name":"P"},"status":{"name":"Open"}}}],"total":2}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer jsrv.Close()
+	s := newServer()
+	app := httptest.NewServer(s.handler())
+	defer app.Close()
+	call := func(method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, app.URL+path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if c, _ := call("POST", "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`); c != 200 {
+		t.Fatal("login")
+	}
+	if c, b := call("GET", "/api/queues/desks", ""); c != 200 || !strings.Contains(b, `"key":"HD"`) {
+		t.Errorf("desks: %d %s", c, b)
+	}
+	if c, b := call("GET", "/api/queues?desk=20", ""); c != 200 || !strings.Contains(b, `"name":"Support"`) || !strings.Contains(b, `"count":2`) {
+		t.Errorf("queues: %d %s", c, b)
+	}
+	// the issues come in the queue's order (HD-9 first), in the usual {issues,next} shape
+	if c, b := call("GET", "/api/issues?src=queue&desk=20&queue=425", ""); c != 200 || strings.Index(b, "HD-9") > strings.Index(b, "HD-3") || !strings.Contains(b, `"next":""`) {
+		t.Errorf("queue issues: %d %s", c, b)
+	}
+	for _, bad := range []string{"/api/queues?desk=", "/api/queues?desk=1/../2", "/api/issues?src=queue&desk=20&queue=x", "/api/issues?src=queue&queue=425"} {
+		if c, _ := call("GET", bad, ""); c != 400 {
+			t.Errorf("%s accepted: %d", bad, c)
+		}
+	}
+}

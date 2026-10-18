@@ -79,7 +79,7 @@ go build -o jirastopwatch-nextgen .        # نیاز به Go 1.24 به بالا
    - **Jira Cloud:** به <https://id.atlassian.com/manage-profile/security/api-tokens> بروید ← *Create API token*. با ایمیل + همین توکن وارد شوید.
    - **Jira Server / Data Center:** آواتار ← *Profile* ← *Personal Access Tokens* ← *Create token* (یا نام کاربری + رمز عبور).
 ۳. گزینه‌ی **Remember me** به‌طور پیش‌فرض روشن است و دفعه‌ی بعد خودکار وارد می‌شوید؛ روی کامپیوتر مشترک آن را بردارید.
-۴. تسک‌ها را با کلید (`ABC-123`)، با چسباندن لینک Jira، یا از *Recent / Assigned / Filters* اضافه کنید.
+۴. تسک‌ها را با کلید (`ABC-123`)، با چسباندن لینک Jira، یا از *Recent / Assigned / Filters / All* (و *Queues* اگر Jira شما Service Management دارد) اضافه کنید. با ▶ شروع کنید و با **Log work** زمان را ثبت کنید؛ با پین، کارتی را بالا نگه دارید، یا روی کارت نگه دارید و بکشید.
 
 ---
 

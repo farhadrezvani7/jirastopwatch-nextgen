@@ -73,7 +73,7 @@ On Windows run `.\install.ps1` to also get a Start Menu shortcut; `./build-all.s
    - **Jira Cloud:** open <https://id.atlassian.com/manage-profile/security/api-tokens> → *Create API token*. Sign in with your email + that token.
    - **Jira Server / Data Center:** your avatar → *Profile* → *Personal Access Tokens* → *Create token* (or use username + password).
 3. Leave **Remember me** ticked (the default) and the app signs you in automatically next time; untick it on a shared computer.
-4. Add issues by key (`ABC-123`), by pasting a Jira link, or by picking them from *Recent / Assigned / Filters*.
+4. Add issues by key (`ABC-123`), by pasting a Jira link, or by picking them from *Recent / Assigned / Filters / All* (and *Queues* if your Jira has Service Management). Press ▶ to start, **Log work** to book the time; click the pin to keep a card on top, or press and hold a card to drag it.
 
 ---
 

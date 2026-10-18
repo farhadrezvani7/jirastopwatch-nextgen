@@ -23,6 +23,10 @@ JiraStopWatch NextGen بر پایه‌ی هسته‌ی پروژه‌ی متن‌
 
 <div align="center"><img src="docs/screenshots/responsive.png" alt="چیدمان ریسپانسیو: روشن، تیره و پنل کشویی تسک‌ها" width="640"></div>
 
+**صف‌های Service Desk** — یک صف را انتخاب کنید تا تسک‌هایش ظاهر شود و بتوانید تایمر بسازید.
+
+<div align="center"><img src="docs/screenshots/queues.png" alt="تب Queues" width="640"></div>
+
 ---
 
 ## نصب (با دو کلیک)

@@ -25,6 +25,10 @@ Start a timer on an issue, work, press **Log work** — the time lands in Jira a
 
 <img src="docs/screenshots/responsive.png" alt="Responsive layout: light, dark, and the slide-over issue list" width="640">
 
+**Service desk queues** — pick a queue and its issues appear, ready to become timers.
+
+<img src="docs/screenshots/queues.png" alt="The Queues tab" width="640">
+
 ---
 
 ## Install (two clicks)

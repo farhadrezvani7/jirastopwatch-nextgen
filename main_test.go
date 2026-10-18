@@ -57,7 +57,7 @@ func TestBrowserArgs(t *testing.T) {
 
 func TestLanguagePacksAreCompleteAndConsistent(t *testing.T) {
 	js, _ := webFS.ReadFile("web/i18n.js")
-	// LANGS entries look like `  fa: ["فارسی", "Persian"],` or `ckb: [...]`.
+	// LANGS entries look like `  de: ["Deutsch", "German"],` or `ckb: [...]`.
 	codes := regexp.MustCompile(`(?m)\b([a-z]{2,3}): \["`).FindAllStringSubmatch(string(js[:bytes.Index(js, []byte("const RTL"))]), -1)
 	if len(codes) < 40 {
 		t.Fatalf("only %d languages declared", len(codes))

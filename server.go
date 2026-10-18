@@ -186,6 +186,8 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /api/update", s.updateStatus)
 	mux.HandleFunc("GET /api/started", s.startedFor)
 	mux.HandleFunc("POST /api/recovery", s.answerRecovery)
+	mux.HandleFunc("GET /api/browsers", s.browsers)
+	mux.HandleFunc("POST /api/open", s.openIssue)
 	mux.HandleFunc("GET /api/today", s.today)
 	mux.HandleFunc("POST /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
@@ -339,6 +341,7 @@ func (s *server) prefs() map[string]any {
 		"timezone":         s.cfg.Timezone,
 		"commentMode":      s.cfg.CommentMode,
 		"startTransitions": s.cfg.StartTransitions,
+		"browser":          s.cfg.Browser,
 		"startOnTop":       s.cfg.StartOnTop,
 		"shadows":          s.cfg.Shadows,
 		"fontSize":         s.cfg.FontSize,
@@ -440,6 +443,7 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 		StartTransitions *string `json:"startTransitions"`
 		TimeMode         *string `json:"timeMode"`
 		TimeAck          *string `json:"timeAck"`
+		Browser          *string `json:"browser"`
 		StartOnTop       *bool   `json:"startOnTop"`
 		Shadows          *bool   `json:"shadows"`
 		FontSize         *int    `json:"fontSize"`
@@ -453,6 +457,12 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	if req.Timezone != nil && *req.Timezone != "" {
 		if _, err := time.LoadLocation(*req.Timezone); err != nil {
 			fail(w, 400, "err.badZone")
+			return
+		}
+	}
+	if req.Browser != nil && *req.Browser != "" {
+		if _, ok := findBrowser(*req.Browser); !ok {
+			fail(w, 400, "err.badRequest")
 			return
 		}
 	}
@@ -496,6 +506,9 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Theme != nil {
 		s.cfg.Theme = *req.Theme
+	}
+	if req.Browser != nil {
+		s.cfg.Browser = *req.Browser
 	}
 	if req.StartOnTop != nil {
 		s.cfg.StartOnTop = *req.StartOnTop
@@ -985,6 +998,43 @@ func (s *server) moveTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// browsers lists the browsers found on this computer, for the Settings picker.
+func (s *server) browsers(w http.ResponseWriter, r *http.Request) {
+	list := listBrowsers()
+	if list == nil {
+		list = []browserInfo{}
+	}
+	writeJSON(w, 200, list)
+}
+
+// openIssue opens a Jira page in the browser the user chose in Settings (or the system default when
+// none is chosen or the chosen one can no longer be started). Only pages of the signed-in Jira site
+// are accepted.
+func (s *server) openIssue(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	s.mu.RLock()
+	site, choice := s.cfg.Site, s.cfg.Browser
+	s.mu.RUnlock()
+	if !decode(r, &req) || !issueURLAllowed(site, req.URL) {
+		fail(w, 400, "err.badRequest")
+		return
+	}
+	fellBack := false
+	if b, ok := findBrowser(choice); ok && launchIn(b, req.URL) == nil {
+		writeJSON(w, 200, map[string]any{"ok": true})
+		return
+	} else if choice != "" {
+		fellBack = true // the chosen browser was uninstalled or won't start
+	}
+	if !openDefaultBrowser(req.URL) {
+		fail(w, 500, "err.openBrowser")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "fellBack": fellBack})
 }
 
 // pinTimer pins or unpins a card. Pinning is kept only in this app (timers.json); Jira knows nothing of it.

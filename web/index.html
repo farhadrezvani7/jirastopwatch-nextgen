@@ -439,7 +439,7 @@ async function applyI18n() {
   applyMode();
   renderTimers(); renderList(); updateClock();
 }
-// The country's name in its own main language, so "ایران" or "日本" find it whatever the UI language is.
+// The country's name in its own main language, so "日本" or "Deutschland" find it whatever the UI language is.
 function nativeName(c) {
   const l = countryLang[c];
   if (!l || l === lang) return "";
@@ -626,6 +626,17 @@ const PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></
 let selKey = "";   // timer the keyboard shortcuts act on
 const selected = () => timers.find(x => x.key === selKey) || timers[0];
 function select(k) { selKey = k; for (const c of document.querySelectorAll("#timers .timer")) c.classList.toggle("sel", c.dataset.key === k); }
+// Jira pages open in the browser chosen in Settings (where the user is already signed in to Jira); with no
+// choice the link behaves as before. If the chosen browser can't be started the server falls back to the default one.
+async function openJira(e, url) {
+  if (!prefs.browser) { if (!e) window.open(url, "_blank", "noopener"); return; }
+  if (e) e.preventDefault();
+  try {
+    const r = await api("POST", "/api/open", {url});
+    if (r.fellBack) toast(t("err.openBrowser"), true);
+  } catch (ex) { toast(ex.message, true); window.open(url, "_blank", "noopener"); }
+}
+
 // A running or pinned card is not removed by accident: ask first.
 const confirmRemove = x => x.pinned ? confirm(t("timer.confirmRemovePinned")) : (!x.running || confirm(t("timer.confirmRemove")));
 async function setPinned(x) { await act(`/api/timers/${x.key}/pin`, "POST", {pinned: !x.pinned}); }
@@ -653,6 +664,7 @@ function renderTimers() {
     const pinBtn = el("button", {type: "button", className: "pinbtn" + (x.pinned ? " on" : ""), title: t(x.pinned ? "timer.unpin" : "timer.pin"), ariaLabel: t(x.pinned ? "timer.unpin" : "timer.pin"), ariaPressed: String(!!x.pinned), innerHTML: PIN});
     pinBtn.onclick = e => { e.stopPropagation(); setPinned(x); };
     const link = el("a", {className: "key", textContent: x.key, href: `${site}/browse/${x.key}`, target: "_blank", rel: "noopener", dir: "ltr"});
+    link.onclick = e => openJira(e, link.href);
     const info = el("div", {className: "info"},
       el("div", {className: "keyline"}, pinBtn, link, el("span", {className: "pill", textContent: x.status, dir: "auto"}), el("span", {className: "proj", textContent: x.project, dir: "auto"}),
         todayByKey[x.key] ? el("span", {className: "pill today", textContent: t("timer.today", {0: fmt(todayByKey[x.key])}), title: t("timer.todayTip")}) : ""),
@@ -930,6 +942,10 @@ async function settingsDialog() {
   themeSel.value = prefs.theme || "";
   const fsSel = el("select", {}, ...[10, 11, 12, 13, 14, 15, 16].map(n => el("option", {value: n, textContent: n + " px"})));
   fsSel.value = prefs.fontSize || DEFAULT_FS;
+  let browsers = [];
+  try { browsers = await api("GET", "/api/browsers"); } catch {}
+  const brSel = el("select", {}, el("option", {value: "", textContent: t("set.browserDefault")}), ...browsers.map(b => el("option", {value: b.id, textContent: b.name})));
+  brSel.value = browsers.some(b => b.id === prefs.browser) ? prefs.browser : "";
   const topChk = el("input", {type: "checkbox", checked: !!prefs.startOnTop});
   const shChk = el("input", {type: "checkbox", checked: !!prefs.shadows});
   const preview = () => applyLook(+fsSel.value, shChk.checked);
@@ -951,6 +967,7 @@ async function settingsDialog() {
   const body = el("div", {}, field(t("set.language"), langCombo.el), langNote, field(t("theme.label"), themeSel),
     field(t("set.fontSize"), fsSel), el("label", {className: "check"}, shChk, " ", t("set.shadows")),
     el("label", {className: "check"}, topChk, " ", t("set.startOnTop")),
+    field(t("set.browser"), brSel),
     field(t("set.country"), countryCombo.el), zoneBox, note, tmField,
     field(t("set.commentMode"), cm), field(t("set.startTransitions"), st), el("div", {className: "hint", textContent: t("set.startHint")}),
     field(t("set.lock"), lockSel), field(t("set.exit"), exitSel), updRow);
@@ -961,7 +978,7 @@ async function settingsDialog() {
   obs.observe(document.body, {childList: true});
   form.onsubmit = async e => {
     e.preventDefault();
-    const next = {fontSize: +fsSel.value === DEFAULT_FS ? 0 : +fsSel.value, shadows: shChk.checked, startOnTop: topChk.checked, lockMode: lockSel.value, exitMode: exitSel.value, ...(prefs.updateEnabled ? {updateCheck: updChk.checked} : {}), theme: themeSel.value, lang: langCombo.get(), country: countryCombo.get(), timezone: chosenZone(),
+    const next = {fontSize: +fsSel.value === DEFAULT_FS ? 0 : +fsSel.value, shadows: shChk.checked, startOnTop: topChk.checked, browser: brSel.value, lockMode: lockSel.value, exitMode: exitSel.value, ...(prefs.updateEnabled ? {updateCheck: updChk.checked} : {}), theme: themeSel.value, lang: langCombo.get(), country: countryCombo.get(), timezone: chosenZone(),
       commentMode: cm.value === "worklog" ? "" : cm.value, startTransitions: st.value};
     if (tmShown) next.timeMode = tmSel.value;
     try {
@@ -1108,7 +1125,7 @@ document.addEventListener("keydown", e => {
     case "r": case "R": if (x) run(() => act(`/api/timers/${x.key}/reset`)); break;
     case "Delete": if (x) run(() => { if (confirmRemove(x)) act(`/api/timers/${x.key}`, "DELETE"); }); break;
     case "i": case "I": case "n": case "N": run(() => $("#addKey").focus()); break;
-    case "o": case "O": if (x) run(() => window.open(`${site}/browse/${x.key}`, "_blank", "noopener")); break;
+    case "o": case "O": if (x) run(() => openJira(null, `${site}/browse/${x.key}`)); break;
     case "c": case "C": if (x && !typing(e) && !getSelection().toString()) run(() => navigator.clipboard?.writeText(x.key)); break;
   }
 });

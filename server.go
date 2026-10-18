@@ -187,6 +187,10 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /api/started", s.startedFor)
 	mux.HandleFunc("POST /api/recovery", s.answerRecovery)
 	mux.HandleFunc("GET /api/browsers", s.browsers)
+	mux.HandleFunc("GET /api/mywork", s.myWork)
+	mux.HandleFunc("POST /api/worklogs", s.addWorklog)
+	mux.HandleFunc("PUT /api/worklogs/{key}/{id}", s.updateWorklog)
+	mux.HandleFunc("DELETE /api/worklogs/{key}/{id}", s.deleteWorklog)
 	mux.HandleFunc("GET /api/queues/desks", s.queueDesks)
 	mux.HandleFunc("GET /api/queues", s.queues)
 	mux.HandleFunc("POST /api/open", s.openIssue)
@@ -344,6 +348,7 @@ func (s *server) prefs() map[string]any {
 		"commentMode":      s.cfg.CommentMode,
 		"startTransitions": s.cfg.StartTransitions,
 		"browser":          s.cfg.Browser,
+		"weekStart":        s.cfg.WeekStart,
 		"startOnTop":       s.cfg.StartOnTop,
 		"shadows":          s.cfg.Shadows,
 		"fontSize":         s.cfg.FontSize,
@@ -446,6 +451,7 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 		TimeMode         *string `json:"timeMode"`
 		TimeAck          *string `json:"timeAck"`
 		Browser          *string `json:"browser"`
+		WeekStart        *string `json:"weekStart"`
 		StartOnTop       *bool   `json:"startOnTop"`
 		Shadows          *bool   `json:"shadows"`
 		FontSize         *int    `json:"fontSize"`
@@ -464,6 +470,14 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Browser != nil && *req.Browser != "" {
 		if _, ok := findBrowser(*req.Browser); !ok {
+			fail(w, 400, "err.badRequest")
+			return
+		}
+	}
+	if req.WeekStart != nil {
+		switch *req.WeekStart {
+		case "", "sat", "sun", "mon":
+		default:
 			fail(w, 400, "err.badRequest")
 			return
 		}
@@ -511,6 +525,9 @@ func (s *server) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Browser != nil {
 		s.cfg.Browser = *req.Browser
+	}
+	if req.WeekStart != nil {
+		s.cfg.WeekStart = *req.WeekStart
 	}
 	if req.StartOnTop != nil {
 		s.cfg.StartOnTop = *req.StartOnTop
@@ -865,6 +882,9 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 		}
 		if jql == "" {
 			jql = `created >= "2000-01-01" ORDER BY updated DESC`
+		} else if strings.HasPrefix(strings.ToUpper(strings.Join(strings.Fields(jql), " ")), "ORDER BY ") {
+			// Jira Cloud refuses a query that is only an ORDER BY ("unbounded"); give it a harmless date bound.
+			jql = `created >= "2000-01-01" ` + jql
 		}
 	case "search":
 		text := strings.TrimSpace(q.Get("q"))
@@ -872,11 +892,21 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]any{"issues": []jira.Issue{}, "next": ""})
 			return
 		}
-		esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(text)
-		jql = `text ~ "` + esc + `*"`
-		textOnly = jql + " ORDER BY updated DESC"
+		// Every word is searched as a prefix and all of them must match. (A quoted phrase with a wildcard,
+		// or a word with a hyphen, finds nothing on Jira Cloud: "jsw-probe*" gave 0 where "jsw*" AND "probe*" gave 3.)
+		var conds []string
+		for _, w := range searchWordRe.FindAllString(text, 8) {
+			conds = append(conds, `text ~ "`+w+`*"`)
+		}
+		if len(conds) == 0 { // only symbols: let Jira see the text as it is
+			esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(text)
+			conds = []string{`text ~ "` + esc + `*"`}
+		}
+		words := strings.Join(conds, " AND ")
+		jql = words
+		textOnly = words + " ORDER BY updated DESC"
 		if k := strings.ToUpper(text); keyRe.MatchString(k) {
-			jql = `issuekey = "` + k + `" OR ` + jql
+			jql = `issuekey = "` + k + `" OR (` + words + `)`
 		}
 		jql += " ORDER BY updated DESC"
 	default:
@@ -1025,6 +1055,9 @@ func (s *server) moveTimer(w http.ResponseWriter, r *http.Request) {
 }
 
 var digitsRe = regexp.MustCompile(`^\d+$`)
+
+// searchWordRe picks the words (letters and digits of any script) out of what was typed in the search box.
+var searchWordRe = regexp.MustCompile(`[\p{L}\p{N}_]+`)
 
 // queueDesks lists the service projects (Jira Service Management) the user can see. A Jira without
 // them, or an account without access, simply has none and the page hides the Queues tab.
@@ -1281,17 +1314,9 @@ func (s *server) today(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.RLock()
-	loc, me := s.cfg.Location(), s.user
-	srvClock, srvOff := s.cfg.TimeMode == timeServer && s.serverKnown, s.serverOff
+	me := s.user
+	day := s.worklogDay(c, time.Now())
 	s.mu.RUnlock()
-	now := time.Now().In(loc)
-	day := now.Format("2006-01-02")
-	// In "match the server clock" mode worklogs carry the local wall time on the server's clock,
-	// so "today" is that same calendar day measured in the server's zone.
-	dayLoc := loc
-	if srvClock {
-		dayLoc = time.FixedZone("jira-server", srvOff)
-	}
 	s.todayMu.Lock()
 	defer s.todayMu.Unlock()
 	gen := s.todayGen.Load()
@@ -1299,22 +1324,39 @@ func (s *server) today(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, s.todayData)
 		return
 	}
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, dayLoc)
-	logs, err := c.WorklogsSince(r.Context(), me, start)
+	// The same read as the My work view, for one day: Jira's own worklogs, grouped by the date in their "started" text.
+	entries, err := c.MyWorklogs(r.Context(), me, day, day)
 	if err != nil {
 		failErr(w, err)
 		return
 	}
-	end := start.AddDate(0, 0, 1)
 	var total int64
 	by := map[string]int64{}
-	for _, l := range logs {
-		if l.Started.Before(end) {
-			total += l.Seconds
-			by[l.Key] += l.Seconds
-		}
+	for _, e := range entries {
+		total += e.Seconds
+		by[e.Key] += e.Seconds
 	}
 	s.todayData = map[string]any{"total": total, "byKey": by, "date": day}
 	s.todayDay, s.todayAt, s.todayFor = day, time.Now(), gen
 	writeJSON(w, 200, s.todayData)
+}
+
+// worklogDay is the calendar date Jira will write on a worklog started at t: the user's own clock when the
+// app writes the local time on the server's clock, the profile zone on Jira Cloud, otherwise the server's zone.
+// (Jira and Tempo group worklogs by the date in "started"; nothing is converted afterwards.) Callers hold s.mu.
+func (s *server) worklogDay(c *jira.Client, t time.Time) string {
+	loc := s.cfg.Location()
+	switch {
+	case s.cfg.TimeMode == timeServer && s.serverKnown:
+		// local wall clock written on the server's clock: the date is the local date
+	case c.IsCloud():
+		if s.user != nil && s.user.TimeZone != "" {
+			if l, err := time.LoadLocation(s.user.TimeZone); err == nil {
+				loc = l
+			}
+		}
+	case s.serverKnown:
+		loc = time.FixedZone("jira-server", s.serverOff)
+	}
+	return t.In(loc).Format("2006-01-02")
 }

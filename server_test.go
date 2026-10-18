@@ -5,10 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"jirastopwatch-nextgen/internal/jira"
 )
 
 // fakeJira records the requests that matter and answers the few endpoints we use.
@@ -690,5 +693,247 @@ func TestKeyShapedSearchFallsBackToTextWhenTheKeyDoesNotExist(t *testing.T) {
 	defer mu.Unlock()
 	if len(jqls) != 2 || strings.Contains(jqls[1], "issuekey") {
 		t.Errorf("expected the key query and then a text-only retry: %v", jqls)
+	}
+}
+
+func TestMyWorkEndpointsAddEditDeleteAndValidation(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var reqs []string
+	var bodies []string
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		reqs = append(reqs, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		switch {
+		case r.URL.Path == "/rest/api/2/myself":
+			_, _ = w.Write([]byte(`{"displayName":"T","name":"me","key":"U1"}`))
+		case r.URL.Path == "/rest/api/2/serverInfo", r.URL.Path == "/rest/api/2/configuration":
+			w.WriteHeader(404)
+		case r.URL.Path == "/rest/api/2/search":
+			_, _ = w.Write([]byte(`{"issues":[{"key":"A-1","fields":{"summary":"First","project":{"name":"P"},"status":{"name":"Open"}}}],"total":1}`))
+		case r.URL.Path == "/rest/api/2/issue/A-1/worklog" && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"total":1,"worklogs":[{"id":"11","author":{"name":"me","key":"U1"},"started":"2026-10-16T09:00:00.000+0000","timeSpentSeconds":5400,"timeSpent":"1h 30m","comment":"c"}]}`))
+		default:
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer jsrv.Close()
+	s := newServer()
+	app := httptest.NewServer(s.handler())
+	defer app.Close()
+	call := func(method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, app.URL+path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if c, _ := call("POST", "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`); c != 200 {
+		t.Fatal("login")
+	}
+	call("POST", "/api/settings", `{"timezone":"UTC"}`)
+
+	// read: Jira's own entries, with the day taken from the started text
+	c, b := call("GET", "/api/mywork?from=2026-10-15&to=2026-10-17", "")
+	if c != 200 || !strings.Contains(b, `"day":"2026-10-16"`) || !strings.Contains(b, `"timeSpent":"1h 30m"`) || !strings.Contains(b, `"key":"A-1"`) {
+		t.Fatalf("mywork: %d %s", c, b)
+	}
+	for _, bad := range []string{"/api/mywork", "/api/mywork?from=2026-10-17&to=2026-10-15", "/api/mywork?from=x&to=y", "/api/mywork?from=2026-01-01&to=2026-12-31"} {
+		if c, _ := call("GET", bad, ""); c != 400 {
+			t.Errorf("%s accepted: %d", bad, c)
+		}
+	}
+
+	// add without any timer: goes to the chosen issue, started as the user's local clock
+	mu.Lock()
+	reqs, bodies = nil, nil
+	mu.Unlock()
+	if c, b := call("POST", "/api/worklogs", `{"key":"a-1","time":"45m","started":"2026-10-16T14:00","comment":"manual"}`); c != 200 {
+		t.Fatalf("add: %d %s", c, b)
+	}
+	mu.Lock()
+	joined := strings.Join(reqs, ",")
+	mu.Unlock()
+	if !strings.Contains(joined, "POST /rest/api/2/issue/A-1/worklog?adjustEstimate=auto") && !strings.Contains(joined, "POST /rest/api/2/issue/A-1/worklog?") {
+		t.Errorf("add did not reach Jira: %s", joined)
+	}
+	if len(s.timers.Snapshot()) != 0 {
+		t.Error("a manual log created a timer")
+	}
+	for _, bad := range []string{`{"key":"nope","time":"1h","started":"2026-10-16T14:00"}`, `{"key":"A-1","time":"0","started":"2026-10-16T14:00"}`, `{"key":"A-1","time":"1h","started":"garbage"}`} {
+		if c, _ := call("POST", "/api/worklogs", bad); c != 400 {
+			t.Errorf("accepted %s: %d", bad, c)
+		}
+	}
+
+	// edit keeps the zone Jira reported; delete goes to the right worklog
+	mu.Lock()
+	reqs, bodies = nil, nil
+	mu.Unlock()
+	if c, b := call("PUT", "/api/worklogs/a-1/11", `{"time":"2h","started":"2026-10-16T09:30","offset":"+0330","comment":"edited"}`); c != 200 {
+		t.Fatalf("edit: %d %s", c, b)
+	}
+	if c, b := call("DELETE", "/api/worklogs/A-1/11", ""); c != 200 {
+		t.Fatalf("delete: %d %s", c, b)
+	}
+	mu.Lock()
+	if len(reqs) != 2 || !strings.HasPrefix(reqs[0], "PUT /rest/api/2/issue/A-1/worklog/11?") || !strings.Contains(bodies[0], `"started":"2026-10-16T09:30:00.000+0330"`) ||
+		!strings.Contains(bodies[0], `"timeSpent":"2h 0m"`) || !strings.Contains(bodies[0], `"comment":"edited"`) || !strings.HasPrefix(reqs[1], "DELETE /rest/api/2/issue/A-1/worklog/11?") {
+		t.Errorf("edit/delete requests: %v %v", reqs, bodies)
+	}
+	mu.Unlock()
+	for _, bad := range []string{"/api/worklogs/A-1/abc", "/api/worklogs/bad/11"} {
+		if c, _ := call("DELETE", bad, ""); c != 400 {
+			t.Errorf("DELETE %s accepted: %d", bad, c)
+		}
+	}
+	if c, _ := call("PUT", "/api/worklogs/A-1/11", `{"time":"2h","started":"2026-10-16T09:30","offset":"zz"}`); c != 400 {
+		t.Errorf("a bad offset was accepted: %d", c)
+	}
+	if c, _ := call("POST", "/api/settings", `{"weekStart":"sat"}`); c != 200 {
+		t.Errorf("weekStart rejected: %d", c)
+	}
+	if c, _ := call("POST", "/api/settings", `{"weekStart":"fri"}`); c != 400 {
+		t.Errorf("an invalid weekStart was accepted: %d", c)
+	}
+}
+
+// "Today" is the date Jira will write on an entry logged now, the same date the My work view groups by.
+func TestWorklogDayFollowsHowJiraWritesStarted(t *testing.T) {
+	now := time.Date(2026, 10, 17, 22, 30, 0, 0, time.UTC) // 01:00 on the 18th in Tehran (+03:30)
+	cloud := jira.New("https://acme.atlassian.net", jira.ModeCloud, "me@x.com", "t")
+	srv := jira.New("https://jira.example.com", jira.ModePAT, "", "t")
+	s := &server{user: &jira.User{TimeZone: "Asia/Tehran"}}
+	s.cfg.Timezone = "Asia/Tehran"
+
+	// Server, exact times: Jira writes entries in the server's zone (UTC here): still the 17th
+	s.serverKnown, s.serverOff = true, 0
+	if got := s.worklogDay(srv, now); got != "2026-10-17" {
+		t.Errorf("server zone: %s", got)
+	}
+	// Server, "match the server clock": the local wall clock is written, so the date is the local one: the 18th
+	s.cfg.TimeMode = timeServer
+	if got := s.worklogDay(srv, now); got != "2026-10-18" {
+		t.Errorf("server-clock mode: %s", got)
+	}
+	// Cloud: Jira reports the user's profile zone: the 18th
+	s.cfg.TimeMode = ""
+	if got := s.worklogDay(cloud, now); got != "2026-10-18" {
+		t.Errorf("cloud profile zone: %s", got)
+	}
+	// server zone unknown: fall back to the app's zone
+	s.serverKnown = false
+	if got := s.worklogDay(srv, now); got != "2026-10-18" {
+		t.Errorf("unknown server zone: %s", got)
+	}
+}
+
+func TestOrderByOnlyJQLGetsADateBound(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var jqls []string
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/myself":
+			_, _ = w.Write([]byte(`{"displayName":"T","name":"me","key":"U1"}`))
+		case "/rest/api/2/search":
+			mu.Lock()
+			jqls = append(jqls, r.URL.Query().Get("jql"))
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"issues":[],"total":0}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer jsrv.Close()
+	s := newServer()
+	app := httptest.NewServer(s.handler())
+	defer app.Close()
+	call := func(method, path, body string) int {
+		req, _ := http.NewRequest(method, app.URL+path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	call("POST", "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`)
+	call("GET", "/api/issues?src=all&jql="+url.QueryEscape("order   by created DESC"), "")
+	call("GET", "/api/issues?src=all&jql="+url.QueryEscape("project = KAN ORDER BY created DESC"), "")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(jqls) != 2 || !strings.HasPrefix(jqls[0], `created >= "2000-01-01" order   by created DESC`) || jqls[1] != "project = KAN ORDER BY created DESC" {
+		t.Errorf("queries sent: %q", jqls)
+	}
+}
+
+// Search words: each typed word is a prefix and all must match, in any script, hyphens and all.
+func TestSearchBuildsOneConditionPerWord(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var jqls []string
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/myself":
+			_, _ = w.Write([]byte(`{"displayName":"T","name":"me","key":"U1"}`))
+		case "/rest/api/2/search":
+			mu.Lock()
+			jqls = append(jqls, r.URL.Query().Get("jql"))
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"issues":[],"total":0}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer jsrv.Close()
+	s := newServer()
+	app := httptest.NewServer(s.handler())
+	defer app.Close()
+	call := func(method, path, body string) {
+		req, _ := http.NewRequest(method, app.URL+path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	call("POST", "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`)
+	for _, q := range []string{"jsw-probe checkout", "HD-72", "login", "привет мир", "!!!", `say "hi"`} {
+		call("GET", "/api/issues?src=search&q="+url.QueryEscape(q), "")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{
+		`text ~ "jsw*" AND text ~ "probe*" AND text ~ "checkout*" ORDER BY updated DESC`,
+		`issuekey = "HD-72" OR (text ~ "HD*" AND text ~ "72*") ORDER BY updated DESC`,
+		`text ~ "login*" ORDER BY updated DESC`,
+		`text ~ "привет*" AND text ~ "мир*" ORDER BY updated DESC`,
+		`text ~ "!!!*" ORDER BY updated DESC`,
+		`text ~ "say*" AND text ~ "hi*" ORDER BY updated DESC`,
+	}
+	if len(jqls) != len(want) {
+		t.Fatalf("queries: %q", jqls)
+	}
+	for i := range want {
+		if jqls[i] != want[i] {
+			t.Errorf("query %d:\n got  %s\n want %s", i, jqls[i], want[i])
+		}
 	}
 }

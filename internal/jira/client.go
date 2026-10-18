@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,9 +99,9 @@ func NormalizeSite(s string) (string, error) {
 	if u.Scheme != "https" && u.Scheme != "http" {
 		return "", errors.New("err.addrScheme")
 	}
-	base := u.Scheme + "://" + u.Host
+	base := u.Scheme + "://" + strings.ToLower(u.Host) // host names are not case-sensitive
 	if IsCloudHost(base) {
-		return base, nil
+		return "https://" + strings.ToLower(u.Host), nil // Jira Cloud is https only (plain http just redirects, which would look like a bad login)
 	}
 	path := strings.TrimRight(u.Path, "/")
 	for _, seg := range []string{"/secure", "/browse", "/projects", "/issues", "/rest", "/dashboard", "/plugins", "/login", "/servicedesk"} {
@@ -121,6 +122,9 @@ func New(base, mode, identity, secret string) *Client {
 		HTTP: &http.Client{Timeout: 20 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
+
+// IsCloud reports whether this is Jira Cloud (which reports times in the user's own zone).
+func (c *Client) IsCloud() bool { return c.cloud() }
 
 func (c *Client) cloud() bool { return c.Mode == ModeCloud || IsCloudHost(c.Base) }
 
@@ -387,13 +391,6 @@ func (c *Client) Remaining(ctx context.Context, key string) (RemainingEstimate, 
 	return RemainingEstimate{r.Fields.TT.Text, r.Fields.TT.Seconds}, nil
 }
 
-// Worklog is one time entry; only what the day totals need.
-type Worklog struct {
-	Key     string
-	Started time.Time
-	Seconds int64
-}
-
 // IsMine reports whether a worklog author (as Jira reports it) is this user.
 func (u *User) IsMine(a Author) bool {
 	switch {
@@ -412,87 +409,6 @@ type Author struct {
 	Name      string `json:"name"`
 	Key       string `json:"key"`
 	Email     string `json:"emailAddress"`
-}
-
-// WorklogsSince returns the current user's worklogs started at or after since, across all issues.
-// Jira's day filter is coarse (it uses the profile time zone), so the caller filters exactly.
-func (c *Client) WorklogsSince(ctx context.Context, me *User, since time.Time) ([]Worklog, error) {
-	jql := fmt.Sprintf(`worklogAuthor = currentUser() AND worklogDate >= "%s"`, since.AddDate(0, 0, -1).Format("2006-01-02"))
-	var issues []Issue
-	for cursor, pages := "", 0; pages < 5; pages++ { // up to 500 issues touched since yesterday
-		page, next, err := c.SearchPage(ctx, jql, 100, cursor)
-		if err != nil {
-			return nil, err
-		}
-		issues = append(issues, page...)
-		if next == "" {
-			break
-		}
-		cursor = next
-	}
-	var (
-		mu       sync.Mutex
-		wg       sync.WaitGroup
-		out      []Worklog
-		firstErr error
-		slots    = make(chan struct{}, 6) // a few issues at a time: quick, but kind to the server
-	)
-	for _, is := range issues {
-		wg.Add(1)
-		slots <- struct{}{}
-		go func(key string) {
-			defer func() { <-slots; wg.Done() }()
-			logs, err := c.issueWorklogs(ctx, me, key, since)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil && firstErr == nil {
-				firstErr = err
-			}
-			out = append(out, logs...)
-		}(is.Key)
-	}
-	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	return out, nil
-}
-
-// issueWorklogs reads one issue's worklogs (paged: a ticket can hold thousands) and keeps the
-// user's own that started at or after since. An issue the user may not read is skipped, so it
-// cannot hide the rest of the day.
-func (c *Client) issueWorklogs(ctx context.Context, me *User, key string, since time.Time) ([]Worklog, error) {
-	var out []Worklog
-	for startAt, pages := 0, 0; pages < 50; pages++ {
-		var res struct {
-			Total    int `json:"total"`
-			Worklogs []struct {
-				Author  Author `json:"author"`
-				Started string `json:"started"`
-				Seconds int64  `json:"timeSpentSeconds"`
-			} `json:"worklogs"`
-		}
-		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
-		if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(key)+"/worklog", q, nil, &res); err != nil {
-			var ae *APIError
-			if errors.As(err, &ae) && (ae.Status == 403 || ae.Status == 404) {
-				return out, nil
-			}
-			return nil, err
-		}
-		for _, w := range res.Worklogs {
-			st, err := time.Parse("2006-01-02T15:04:05.000-0700", w.Started)
-			if err != nil || st.Before(since) || !me.IsMine(w.Author) {
-				continue
-			}
-			out = append(out, Worklog{key, st, w.Seconds})
-		}
-		startAt += len(res.Worklogs)
-		if len(res.Worklogs) == 0 || startAt >= res.Total {
-			break
-		}
-	}
-	return out, nil
 }
 
 // HasWorklog reports whether the user already has a worklog on key with this start (to the minute)
@@ -675,4 +591,171 @@ func (c *Client) IssuesByKeys(ctx context.Context, keys []string) ([]Issue, erro
 		}
 	}
 	return out, nil
+}
+
+// ---- My work: the user's own worklogs for a range of days, and editing them ----
+
+// WorklogEntry is one worklog exactly as Jira reports it. Day is the date part of Started as Jira
+// wrote it (Jira and Tempo group by that date, with no zone conversion); TimeSpent is Jira's own text.
+type WorklogEntry struct {
+	ID        string `json:"id"`
+	Key       string `json:"key"`
+	Summary   string `json:"summary"`
+	Project   string `json:"project"`
+	Day       string `json:"day"`     // 2006-01-02
+	Time      string `json:"time"`    // 15:04, the wall-clock part of Started
+	Offset    string `json:"offset"`  // +0000, the zone part of Started (kept when editing)
+	Started   string `json:"started"` // as returned by Jira
+	Seconds   int64  `json:"seconds"`
+	TimeSpent string `json:"timeSpent"` // Jira's own text, e.g. "1h 30m"
+	Comment   string `json:"comment"`
+	Created   string `json:"created"`
+	Updated   string `json:"updated"`
+}
+
+var (
+	dayRe    = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	offsetRe = regexp.MustCompile(`^[+-]\d{4}$`)
+)
+
+// ValidDay reports whether s is a calendar date like 2026-10-17.
+func ValidDay(s string) bool {
+	if !dayRe.MatchString(s) {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
+
+// MyWorklogs returns the user's own worklogs whose started date falls in [from, to] (both "2006-01-02"),
+// oldest first, read from Jira: the issues with the user's worklogs in that range, then each issue's
+// worklogs. Nothing is estimated or converted.
+func (c *Client) MyWorklogs(ctx context.Context, me *User, from, to string) ([]WorklogEntry, error) {
+	if !ValidDay(from) || !ValidDay(to) || to < from {
+		return nil, errors.New("err.badRequest")
+	}
+	f, _ := time.Parse("2006-01-02", from)
+	t, _ := time.Parse("2006-01-02", to)
+	// Jira's day filter is coarse (zones), so widen it by a day on each side and filter exactly below.
+	jql := fmt.Sprintf(`worklogAuthor = currentUser() AND worklogDate >= "%s" AND worklogDate <= "%s"`,
+		f.AddDate(0, 0, -1).Format("2006-01-02"), t.AddDate(0, 0, 1).Format("2006-01-02"))
+	var issues []Issue
+	for cursor, pages := "", 0; pages < 5; pages++ {
+		page, next, err := c.SearchPage(ctx, jql, 100, cursor)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, page...)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		out      []WorklogEntry
+		firstErr error
+		slots    = make(chan struct{}, 6)
+	)
+	for _, is := range issues {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func(is Issue) {
+			defer func() { <-slots; wg.Done() }()
+			got, err := c.issueEntries(ctx, me, is, from, to)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+			out = append(out, got...)
+		}(is)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Day != out[j].Day {
+			return out[i].Day < out[j].Day
+		}
+		if out[i].Time != out[j].Time {
+			return out[i].Time < out[j].Time
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (c *Client) issueEntries(ctx context.Context, me *User, is Issue, from, to string) ([]WorklogEntry, error) {
+	var out []WorklogEntry
+	for startAt, pages := 0, 0; pages < 50; pages++ {
+		var res struct {
+			Total    int `json:"total"`
+			Worklogs []struct {
+				ID        string `json:"id"`
+				Author    Author `json:"author"`
+				Started   string `json:"started"`
+				Created   string `json:"created"`
+				Updated   string `json:"updated"`
+				Comment   string `json:"comment"`
+				TimeSpent string `json:"timeSpent"`
+				Seconds   int64  `json:"timeSpentSeconds"`
+			} `json:"worklogs"`
+		}
+		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
+		if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(is.Key)+"/worklog", q, nil, &res); err != nil {
+			var ae *APIError
+			if errors.As(err, &ae) && (ae.Status == 403 || ae.Status == 404) {
+				return out, nil // an issue the user may not read must not hide the rest of the week
+			}
+			return nil, err
+		}
+		for _, w := range res.Worklogs {
+			if len(w.Started) < 16 || !me.IsMine(w.Author) {
+				continue
+			}
+			day := w.Started[:10]
+			if day < from || day > to {
+				continue
+			}
+			off := ""
+			if len(w.Started) >= 5 && offsetRe.MatchString(w.Started[len(w.Started)-5:]) {
+				off = w.Started[len(w.Started)-5:]
+			}
+			out = append(out, WorklogEntry{ID: w.ID, Key: is.Key, Summary: is.Summary, Project: is.Project, Day: day,
+				Time: w.Started[11:16], Offset: off, Started: w.Started, Seconds: w.Seconds, TimeSpent: w.TimeSpent,
+				Comment: w.Comment, Created: w.Created, Updated: w.Updated})
+		}
+		startAt += len(res.Worklogs)
+		if len(res.Worklogs) == 0 || startAt >= res.Total {
+			break
+		}
+	}
+	return out, nil
+}
+
+// UpdateWorklog changes a worklog (Jira checks that the user may). The remaining estimate follows
+// Jira's own "auto" rule unless est says otherwise.
+func (c *Client) UpdateWorklog(ctx context.Context, key, id string, started time.Time, d time.Duration, comment string, est Estimate) error {
+	body := map[string]any{"timeSpent": FormatDuration(d), "started": JiraTime(started), "comment": comment}
+	return c.do(ctx, "PUT", "/rest/api/2/issue/"+url.PathEscape(key)+"/worklog/"+url.PathEscape(id), estimateQuery(est), body, nil)
+}
+
+// DeleteWorklog removes a worklog; the remaining estimate is adjusted by Jira ("auto").
+func (c *Client) DeleteWorklog(ctx context.Context, key, id string) error {
+	return c.do(ctx, "DELETE", "/rest/api/2/issue/"+url.PathEscape(key)+"/worklog/"+url.PathEscape(id), url.Values{"adjustEstimate": {"auto"}}, nil, nil)
+}
+
+// estimateQuery builds the adjustEstimate parameters Jira accepts when a worklog is changed
+// (auto, leave, new); anything else means auto.
+func estimateQuery(est Estimate) url.Values {
+	switch est.Method {
+	case "leave":
+		return url.Values{"adjustEstimate": {"leave"}}
+	case "new":
+		return url.Values{"adjustEstimate": {"new"}, "newEstimate": {est.Value}}
+	}
+	return url.Values{"adjustEstimate": {"auto"}}
 }

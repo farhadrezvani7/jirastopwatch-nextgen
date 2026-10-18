@@ -33,6 +33,7 @@ type Config struct {
 	TimeMode         string `json:"timeMode,omitempty"`         // "" = send the exact moment (standard) | server = write the local clock time on the Jira server's clock
 	TimeAck          string `json:"timeAck,omitempty"`          // which clock-difference notice the user has already answered
 	StartTransitions string `json:"startTransitions,omitempty"` // status names to move an issue to when its timer starts, one per line
+	WeekStart        string `json:"weekStart,omitempty"`        // first day of the My work week: sat | sun | mon; empty = by language
 	Browser          string `json:"browser,omitempty"`          // id of the browser Jira issues open in; empty = the system default
 	StartOnTop       bool   `json:"startOnTop,omitempty"`       // a timer that starts moves to the top of the list
 	Shadows          bool   `json:"shadows,omitempty"`          // draw drop shadows (off by default)

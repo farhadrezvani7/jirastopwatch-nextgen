@@ -94,6 +94,7 @@ Object.assign(STR.en, {
   "tab.queues": "Queues", "queue.none": "No queues found.",
   "about.version": "Version {0}",
   "log.to": "Log to issue", "log.pickHint": "Your other timers are listed; type to search every issue.",
+  "menu.mywork": "My work", "menu.manual": "Log time manually", "mywork.thisWeek": "This week", "mywork.weekTotal": "Week total", "mywork.fromJira": "Read from Jira at {0}", "mywork.none": "Nothing logged", "mywork.weekStart": "Week starts", "mywork.auto": "By language", "mywork.add": "Add time", "mywork.edit": "Edit worklog", "mywork.delete": "Delete", "mywork.confirmDelete": "Delete {0} ({1}) from Jira? This cannot be undone.", "mywork.confirmBtn": "Yes, delete", "mywork.saved": "Worklog saved", "mywork.deleted": "Worklog deleted", "manual.pick": "Choose an issue first", "manual.choose": "Choose an issue…",
   "set.fontSize": "Base font size", "set.shadows": "Show shadows",
   "hdr.today": "Logged today", "hdr.todayTip": "Everything you logged on Jira today, on all issues",
   "timer.today": "Today {0}", "timer.todayTip": "What you logged on this issue today",

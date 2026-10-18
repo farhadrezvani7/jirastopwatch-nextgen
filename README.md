@@ -29,6 +29,10 @@ Start a timer on an issue, work, press **Log work** — the time lands in Jira a
 
 <img src="docs/screenshots/queues.png" alt="The Queues tab" width="640">
 
+**My work** — your week, one column per day, straight from Jira.
+
+<img src="docs/screenshots/mywork.png" alt="My work: a week of worklogs, one column per day" width="640">
+
 ---
 
 ## Install (two clicks)
@@ -123,6 +127,9 @@ Multiple stopwatches · reorder with ▲▼ · pause others when one starts · e
 - 🗂 **Service desk queues** — if your Jira has Jira Service Management, a *Queues* tab appears: pick a service project, then a queue, and its issues are listed (with counts and *Load more*), ready to add as timers. It uses Jira's standard service-desk API, so it works on Jira Cloud and on Server/Data Center, with all three sign-in methods. Jira without Service Management, or an account without agent access, simply doesn't show the tab; a project you can't open shows Jira's own message. Inside a queue, a saved filter or a JQL result, the search box narrows the list you are looking at (the ‹ button goes back to the queues); on *Recent*, *Assigned* and *All* it searches all of Jira.
 - 🌐 **Choose the browser for Jira links** — in *Settings → Open Jira issues in* pick any browser installed on your computer (found automatically on Windows and Linux), so issue links open where you are already signed in to Jira. The default is your system browser; if the chosen one is uninstalled the default is used instead. Only pages of your own Jira site are ever opened this way.
 - ⤴️ **Started timers jump to the top** — optional (Settings): a timer that starts moves to the top of the list by itself, so you never reorder by hand.
+- 🌍 **Tested on both flavours of Jira** — every feature is exercised against a live **Jira Cloud** site (email + API token) and a live **Jira Server 8.15** (personal access token, and username + password), in addition to the automated tests that run for all three sign-in methods. Pasting any Jira page address (even a long `…/jira/for-you?tab=…` link, or `http://` on Cloud) is enough to sign in.
+- 🗓 **My work** — profile window → *My work* shows your own worklogs for a week, one column per day with its Gregorian date, the day's total, and every worklog (issue key, summary, time, comment) exactly as Jira has it: click one to edit or delete it, **+** adds time on that day. Everything is read from Jira each time (and again after every change); a day belongs to the date written in the worklog's *started* text, the same rule Jira and Tempo use, so the numbers match Tempo's week view. The first day of the week follows your language and can be changed. It uses Jira's standard worklog API, so it works on Jira Cloud and Server/Data Center with all three sign-in methods, with or without Tempo.
+- ✍️ **Log time manually** — profile window → *Log time manually*: pick any issue, a date and time, a length, a comment (and optionally a status change and estimate) and book it without any timer.
 - 🔀 **Wrong card? Log to another issue** — the log dialog has a *Log to issue* picker (your other timers, or search every issue). The time is booked on the issue you choose, its remaining estimate and status list are those of that issue, and the card you started by mistake is the one that is used up. *Log & start again* then continues on the issue you chose.
 - 🔁 **Log & start again** — a button in the log dialog books the worklog and immediately restarts the same issue's timer, no searching needed.
 - ✋ **Drag and drop** — press and hold a card, then drag it to a new place (▲▼ and `Ctrl+↑/↓` still work).

@@ -2,7 +2,9 @@ package jira
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,7 +43,7 @@ func TestRemainingEstimate(t *testing.T) {
 	}
 }
 
-func TestWorklogsSincePagesAndFiltersByAuthorAndTime(t *testing.T) {
+func TestMyWorklogsPagesAndFiltersByAuthorAndDay(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rest/api/2/search", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"issues":[{"key":"A-1","fields":{}}]}`))
@@ -59,8 +61,7 @@ func TestWorklogsSincePagesAndFiltersByAuthorAndTime(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	since := time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)
-	logs, err := New(srv.URL, ModeBasic, "u", "p").WorklogsSince(context.Background(), &User{Name: "me"}, since)
+	logs, err := New(srv.URL, ModeBasic, "u", "p").MyWorklogs(context.Background(), &User{Name: "me"}, "2026-10-17", "2026-10-17")
 	var sum int64
 	for _, l := range logs {
 		sum += l.Seconds
@@ -134,7 +135,7 @@ func TestReadFeaturesWorkInAllThreeLoginModes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			logs, err := cl.WorklogsSince(context.Background(), me, time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC))
+			logs, err := cl.MyWorklogs(context.Background(), me, "2026-10-17", "2026-10-17")
 			if err != nil || len(logs) != 1 || logs[0].Seconds != 900 {
 				t.Errorf("today's worklogs (only mine): %+v err=%v", logs, err)
 			}
@@ -176,8 +177,8 @@ func TestHasWorklogMatchesMineByStartMinuteAndLength(t *testing.T) {
 }
 
 func TestIsMineIgnoresCaseOfNamesAndKeys(t *testing.T) {
-	u := &User{Name: "Farhad_Rezvani", Key: "JIRAUSER29505"}
-	if !u.IsMine(Author{Key: "jirauser29505"}) || !u.IsMine(Author{Name: "farhad_rezvani"}) {
+	u := &User{Name: "Jane_Doe", Key: "JIRAUSER10001"}
+	if !u.IsMine(Author{Key: "jirauser10001"}) || !u.IsMine(Author{Name: "jane_doe"}) {
 		t.Error("the same user written in another case was not recognised")
 	}
 	if u.IsMine(Author{Key: "JIRAUSER1"}) {
@@ -252,5 +253,77 @@ func TestJiraWithoutServiceManagementHasNoQueues(t *testing.T) {
 		if err != nil || len(desks) != 0 {
 			t.Errorf("status %d: desks=%v err=%v (want none, no error)", status, desks, err)
 		}
+	}
+}
+
+// My work: the day of a worklog is the date part of "started" exactly as Jira wrote it, only the user's own
+// worklogs are returned, Jira's own text is kept, and every sign-in mode works.
+func TestMyWorklogsDayRuleAndOwnershipInAllThreeLoginModes(t *testing.T) {
+	for _, c := range []struct{ name, mode, id, secret, auth, search, user, author string }{
+		{"cloud", ModeCloud, "me@x.com", "tok", "Basic bWVAeC5jb206dG9r", "/rest/api/3/search/jql", `{"accountId":"acc-1"}`, `{"accountId":"acc-1"}`},
+		{"pat", ModePAT, "", "pat1", "Bearer pat1", "/rest/api/2/search", `{"name":"me","key":"U1"}`, `{"name":"me","key":"U1"}`},
+		{"basic", ModeBasic, "me", "pw", "Basic bWU6cHc=", "/rest/api/2/search", `{"name":"me","key":"U1"}`, `{"name":"me","key":"U1"}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != c.auth {
+					t.Errorf("%s: auth %q", r.URL.Path, r.Header.Get("Authorization"))
+				}
+				switch r.URL.Path {
+				case c.search:
+					_, _ = w.Write([]byte(`{"issues":[{"key":"A-1","fields":{"summary":"First","project":{"name":"P"},"status":{"name":"Open"}}}],"total":1}`))
+				case "/rest/api/2/issue/A-1/worklog":
+					_, _ = w.Write([]byte(`{"total":5,"worklogs":[
+					 {"id":"11","author":` + c.author + `,"started":"2026-10-15T23:11:00.000+0000","timeSpentSeconds":5400,"timeSpent":"1h 30m","comment":"late one"},
+					 {"id":"12","author":` + c.author + `,"started":"2026-10-16T09:00:00.000+0330","timeSpentSeconds":600,"timeSpent":"10m"},
+					 {"id":"13","author":{"accountId":"x","name":"other","key":"OTHER"},"started":"2026-10-16T10:00:00.000+0000","timeSpentSeconds":999,"timeSpent":"16m"},
+					 {"id":"14","author":` + c.author + `,"started":"2026-10-09T10:00:00.000+0000","timeSpentSeconds":60,"timeSpent":"1m"},
+					 {"id":"15","author":` + c.author + `,"started":"2026-10-18T00:00:00.000+0000","timeSpentSeconds":60,"timeSpent":"1m"}]}`))
+				default:
+					w.WriteHeader(404)
+				}
+			}))
+			defer srv.Close()
+			var me User
+			_ = json.Unmarshal([]byte(c.user), &me)
+			got, err := New(srv.URL, c.mode, c.id, c.secret).MyWorklogs(context.Background(), &me, "2026-10-15", "2026-10-17")
+			if err != nil || len(got) != 2 {
+				t.Fatalf("entries: %+v err=%v", got, err)
+			}
+			// 23:11 UTC stays on the 15th (no conversion to the user's zone); the +0330 entry keeps its own date and zone
+			a, b := got[0], got[1]
+			if a.ID != "11" || a.Day != "2026-10-15" || a.Time != "23:11" || a.Offset != "+0000" || a.TimeSpent != "1h 30m" || a.Seconds != 5400 || a.Comment != "late one" || a.Key != "A-1" || a.Summary != "First" {
+				t.Errorf("first entry: %+v", a)
+			}
+			if b.ID != "12" || b.Day != "2026-10-16" || b.Offset != "+0330" || b.TimeSpent != "10m" {
+				t.Errorf("second entry: %+v", b)
+			}
+		})
+	}
+}
+
+func TestUpdateAndDeleteWorklogRequests(t *testing.T) {
+	var got []string
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		body = string(b)
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+	cl := New(srv.URL, ModePAT, "", "x")
+	at := time.Date(2026, 10, 15, 9, 30, 0, 0, time.FixedZone("", 3*3600+1800))
+	if err := cl.UpdateWorklog(context.Background(), "A-1", "11", at, 90*time.Minute, "note", Estimate{}); err != nil {
+		t.Fatal(err)
+	}
+	if got[0] != "PUT /rest/api/2/issue/A-1/worklog/11?adjustEstimate=auto" || !strings.Contains(body, `"timeSpent":"1h 30m"`) || !strings.Contains(body, `"started":"2026-10-15T09:30:00.000+0330"`) || !strings.Contains(body, `"comment":"note"`) {
+		t.Errorf("update: %v %s", got, body)
+	}
+	if err := cl.DeleteWorklog(context.Background(), "A-1", "11"); err != nil || got[1] != "DELETE /rest/api/2/issue/A-1/worklog/11?adjustEstimate=auto" {
+		t.Errorf("delete: %v %v", got, err)
+	}
+	if !ValidDay("2026-10-17") || ValidDay("2026-13-01") || ValidDay("2026-1-1") || ValidDay("") {
+		t.Error("ValidDay")
 	}
 }

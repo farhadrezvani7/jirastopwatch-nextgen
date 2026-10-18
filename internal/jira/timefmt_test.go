@@ -52,6 +52,9 @@ func TestNormalizeSite(t *testing.T) {
 		"https://jira.example.com/browse/ABC-1":          "https://jira.example.com",
 		"https://example.com/jira/secure/Dashboard.jspa": "https://example.com/jira",
 		"http://127.0.0.1:8080/":                         "http://127.0.0.1:8080",
+		"http://acme.atlassian.net":                      "https://acme.atlassian.net", // Cloud is https only
+		"HTTPS://Acme.Atlassian.NET/browse/ABC-1":        "https://acme.atlassian.net",
+		"https://Jira.Example.com/Jira/browse/A-1":       "https://jira.example.com/Jira",
 	}
 	for in, want := range cases {
 		if got, err := NormalizeSite(in); err != nil || got != want {

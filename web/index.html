@@ -220,6 +220,30 @@ header .brand,.total,.clock{white-space:nowrap}
   #toast{left:12px;right:12px;bottom:12px;transform:none}
   .toast{max-width:100%}
 }
+/* My work: the user's worklogs for a week, one column per day */
+.mw{position:fixed;inset:0;z-index:45;background:var(--bg);display:flex;flex-direction:column}
+.mw-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--nav)}
+.mw-bar select{width:auto;padding:6px 8px}
+.mw-sub{padding:8px 16px 0}
+#mwLabel,.mw-day>header span{unicode-bidi:isolate}
+.mw-grid{display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:10px;padding:12px 14px 20px;overflow:auto;flex:1;align-items:start}
+.mw-day{border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;display:flex;flex-direction:column;box-shadow:var(--sh-1)}
+.mw-day.today{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}
+.mw-day>header{display:block;grid-column:auto;padding:8px 10px;border-bottom:1px solid var(--line);background:none;box-shadow:none;position:static}
+.mw-day>header b{display:block}
+.mw-day>header span{color:var(--muted);font-size:calc(var(--fs)*.92)}
+.mw-day>header .tot{display:block;margin-top:2px;color:var(--accent);font-weight:700;font-size:calc(var(--fs)*1.3)}
+.mw-list{display:flex;flex-direction:column;gap:6px;padding:8px;min-height:40px}
+.mw-e{display:block;width:100%;text-align:start;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:6px 8px;line-height:1.4}
+.mw-e:hover{border-color:var(--accent)}
+.mw-e .r1{display:flex;justify-content:space-between;gap:8px}
+.mw-e .k{font-weight:700;color:var(--link)}
+.mw-e .d{font-weight:700;white-space:nowrap}
+.mw-e .s{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mw-e .c{color:var(--muted);font-size:calc(var(--fs)*.9);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mw-add{margin:0 8px 8px;border:1px dashed var(--line);border-radius:9px;background:none;color:var(--muted);padding:2px 0}
+.mw-add:hover{border-color:var(--accent);color:var(--text)}
+@media (max-width:700px){.mw-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -298,6 +322,21 @@ header .brand,.total,.clock{white-space:nowrap}
   </aside>
 </div>
 
+<section id="mywork" class="mw hidden" aria-label="My work">
+  <div class="mw-bar">
+    <button type="button" class="iconbtn" id="mwPrev" aria-label="Previous week">‹</button>
+    <b id="mwLabel" dir="auto"></b>
+    <button type="button" class="iconbtn" id="mwNext" aria-label="Next week">›</button>
+    <button type="button" class="iconbtn" id="mwToday" data-i18n="mywork.thisWeek"></button>
+    <select id="mwWeekStart" aria-label="Week start"></select>
+    <button type="button" class="iconbtn" id="mwRefresh" data-tip="reload.tip">⟳</button>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="mwAdd" data-i18n="menu.manual"></button>
+    <button type="button" class="iconbtn" id="mwClose" aria-label="Close">✕</button>
+  </div>
+  <div class="mw-sub hint"><span id="mwTotalLbl"></span> <b id="mwTotal" class="mono">–</b> · <span id="mwFetched"></span></div>
+  <div class="mw-grid" id="mwGrid"></div>
+</section>
 <div id="toast"></div>
 
 <script src="i18n.js"></script>
@@ -619,6 +658,8 @@ $("#userBtn").onclick = () => {
   let close;
   const body = el("div", {},
     el("label", {className: "check"}, cb, el("span", {textContent: t("set.pauseOthers")})),
+    row(t("menu.mywork"), () => { close(); openMyWork(); }),
+    row(t("menu.manual"), () => { close(); manualDialog(); }),
     row(t("menu.settings"), () => { close(); settingsDialog(); }),
     ...(prefs.updateEnabled ? [row(t("menu.update"), () => { close(); updateFlow(); })] : []),
     row(t("menu.signOut"), () => { close(); signOut(); }),
@@ -1228,7 +1269,7 @@ function renderList() {
 /* ---------- keyboard shortcuts (same as the original StopWatch) ---------- */
 const typing = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
 document.addEventListener("keydown", e => {
-  if (!e.ctrlKey || e.altKey || e.metaKey || $("#app").classList.contains("hidden") || document.querySelector(".scrim")) return;
+  if (!e.ctrlKey || e.altKey || e.metaKey || $("#app").classList.contains("hidden") || !$("#mywork").classList.contains("hidden") || document.querySelector(".scrim")) return;
   const x = selected();
   const run = f => { e.preventDefault(); f(); };
   switch (e.key) {
@@ -1246,7 +1287,7 @@ document.addEventListener("keydown", e => {
 });
 // Ctrl+V outside a text field adds the pasted issue key or Jira URL.
 document.addEventListener("paste", e => {
-  if (typing(e) || $("#app").classList.contains("hidden") || document.querySelector(".scrim")) return;
+  if (typing(e) || $("#app").classList.contains("hidden") || !$("#mywork").classList.contains("hidden") || document.querySelector(".scrim")) return;
   const text = e.clipboardData?.getData("text")?.trim();
   if (text) { e.preventDefault(); addIssue(text.slice(0, 500)); }
 });
@@ -1327,6 +1368,196 @@ async function updateFlow() {
   };
 }
 $("#updlink").onclick = e => { e.preventDefault(); updateFlow(); };
+
+/* ---------- My work: the user's worklogs for a week, read from Jira (nothing is estimated here) ---------- */
+// Days are plain calendar dates (2026-10-17): Jira and Tempo put a worklog on the date written in its "started" text.
+const parseDay = d => new Date(d + "T00:00:00Z");
+const ymd = dt => dt.toISOString().slice(0, 10);
+const addDays = (d, n) => ymd(new Date(parseDay(d).getTime() + n * 86400000));
+const WEEK_START = {sun: 0, mon: 1, sat: 6};
+function weekStartIndex() {
+  if (prefs.weekStart && prefs.weekStart in WEEK_START) return WEEK_START[prefs.weekStart];
+  try {
+    const loc = new Intl.Locale(lang), wi = loc.getWeekInfo ? loc.getWeekInfo() : loc.weekInfo;
+    if (wi && wi.firstDay) return wi.firstDay % 7;   // 1 = Monday ... 7 = Sunday
+  } catch {}
+  return 1;
+}
+function weekOf(d) { const ws = weekStartIndex(); return addDays(d, -((parseDay(d).getUTCDay() - ws + 7) % 7)); }
+function todayInZone() {
+  try { return new Intl.DateTimeFormat("en-CA", {timeZone: zoneInfo && zoneInfo.name !== "Local" ? zoneInfo.name : undefined, year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date()); }
+  catch { return new Date().toISOString().slice(0, 10); }
+}
+// Dates are always shown in the Gregorian calendar with Western digits, whatever the language.
+const gregorian = (opts) => { try { return new Intl.DateTimeFormat(lang + "-u-ca-gregory-nu-latn", {...opts, timeZone: "UTC"}); } catch { return new Intl.DateTimeFormat("en", {...opts, timeZone: "UTC"}); } };
+
+// Hours and minutes like Jira and Tempo show them ("9h 29m", "2h", "45m"); never days, whatever Jira's own text says.
+const hm = sec => { const m = Math.round(sec / 60), h = Math.floor(m / 60), r = m % 60; return h ? (r ? `${h}h ${r}m` : `${h}h`) : `${r}m`; };
+const mw = {start: "", entries: [], fetchedAt: 0, seq: 0};
+function openMyWork() {
+  $("#mywork").classList.remove("hidden");
+  mw.start = weekOf(todayInZone());
+  fillWeekStart();
+  loadWeek();
+}
+function closeMyWork() { $("#mywork").classList.add("hidden"); refresh(); fetchToday(); }
+function fillWeekStart() {
+  const sel = $("#mwWeekStart"), day = n => gregorian({weekday: "long"}).format(parseDay(addDays("2026-10-18", n)));   // 2026-10-18 is a Sunday
+  sel.replaceChildren(el("option", {value: "", textContent: t("mywork.weekStart") + ": " + t("mywork.auto")}),
+    ...[["sat", 6], ["sun", 0], ["mon", 1]].map(([v, n]) => el("option", {value: v, textContent: t("mywork.weekStart") + ": " + day(n)})));
+  sel.value = prefs.weekStart || "";
+}
+async function loadWeek() {
+  const seq = ++mw.seq, from = mw.start, to = addDays(from, 6);
+  const f = gregorian({day: "numeric", month: "short"}), fy = gregorian({day: "numeric", month: "short", year: "numeric"});
+  $("#mwLabel").textContent = f.format(parseDay(from)) + " – " + fy.format(parseDay(to));
+  $("#mwGrid").replaceChildren(el("div", {className: "note"}, el("span", {className: "spin"})));
+  try {
+    const d = await api("GET", `/api/mywork?from=${from}&to=${to}`);
+    if (seq !== mw.seq) return;
+    mw.entries = d.entries; mw.fetchedAt = d.fetchedAt; renderWeek();
+  } catch (ex) { if (seq === mw.seq) $("#mwGrid").replaceChildren(el("div", {className: "note", textContent: ex.message})); }
+}
+function renderWeek() {
+  const grid = $("#mwGrid"), today = todayInZone(), wd = gregorian({weekday: "short"}), dd = gregorian({day: "numeric", month: "short", year: "numeric"});
+  grid.replaceChildren();
+  let weekSec = 0;
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(mw.start, i), rows = mw.entries.filter(e => e.day === day);
+    const sec = rows.reduce((a, e) => a + e.seconds, 0);   // the sum of the durations Jira returned for this day
+    weekSec += sec;
+    const list = el("div", {className: "mw-list"});
+    if (!rows.length) list.append(el("div", {className: "hint", textContent: t("mywork.none"), style: "text-align:center"}));
+    for (const e of rows) {
+      const card = el("button", {type: "button", className: "mw-e", title: `${e.key} — ${e.summary}`},
+        el("div", {className: "r1"}, el("span", {className: "k", textContent: e.key, dir: "ltr"}), el("span", {className: "d mono", textContent: hm(e.seconds), dir: "ltr", title: "Jira: " + e.timeSpent})),
+        el("div", {className: "s", dir: "auto", textContent: e.summary}),
+        el("div", {className: "c", dir: "auto", textContent: e.time + (e.comment ? " · " + e.comment : "")}));
+      card.onclick = () => editWorklogDialog(e);
+      list.append(card);
+    }
+    const add = el("button", {type: "button", className: "mw-add", textContent: "+", title: t("mywork.add"), ariaLabel: t("mywork.add")});
+    add.onclick = () => manualDialog(day);
+    grid.append(el("div", {className: "mw-day" + (day === today ? " today" : "")},
+      el("header", {}, el("b", {textContent: wd.format(parseDay(day))}), el("span", {textContent: dd.format(parseDay(day)), dir: "auto"}),
+        el("span", {className: "tot mono", textContent: rows.length ? hm(sec) : "–", dir: "ltr", title: rows.length ? `${rows.length} worklog(s)` : ""})),
+      list, add));
+  }
+  $("#mwTotalLbl").textContent = t("mywork.weekTotal");
+  $("#mwTotal").textContent = hm(weekSec);
+  $("#mwFetched").textContent = t("mywork.fromJira", {0: new Date(mw.fetchedAt * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})});
+}
+$("#mwPrev").onclick = () => { mw.start = addDays(mw.start, -7); loadWeek(); };
+$("#mwNext").onclick = () => { mw.start = addDays(mw.start, 7); loadWeek(); };
+$("#mwToday").onclick = () => { mw.start = weekOf(todayInZone()); loadWeek(); };
+$("#mwRefresh").onclick = loadWeek;
+$("#mwClose").onclick = closeMyWork;
+$("#mwAdd").onclick = () => manualDialog();
+$("#mwWeekStart").onchange = async e => {
+  prefs.weekStart = e.target.value;
+  api("POST", "/api/settings", {weekStart: prefs.weekStart}).catch(() => {});
+  mw.start = weekOf(mw.start); loadWeek();
+};
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#mywork").classList.contains("hidden") && !document.querySelector(".scrim")) closeMyWork(); });
+
+// Edit or delete one worklog. The start keeps the zone Jira reported, so an edit never moves it to another day by itself.
+function editWorklogDialog(e) {
+  const time = el("input", {type: "text", className: "ltr", value: hm(e.seconds), spellcheck: false});
+  const started = el("input", {type: "datetime-local", value: `${e.day}T${e.time}`});
+  const comment = el("textarea", {rows: 3, dir: "auto", value: e.comment || "", placeholder: t("log.commentPh")});
+  const body = el("div", {}, el("div", {className: "row"}, field(t("log.time"), time), field(t("log.started"), started)), field(t("log.comment"), comment));
+  let armed = false, close;
+  const del = el("button", {type: "button", className: "btn danger", textContent: t("mywork.delete")});
+  del.style.marginInlineEnd = "auto";
+  const warn = el("div", {className: "hint hidden", dir: "auto", textContent: t("mywork.confirmDelete", {0: e.key, 1: hm(e.seconds)})});
+  warn.style.color = "var(--danger)";
+  const save = el("button", {type: "submit", className: "btn", textContent: t("btn.save")});
+  const m = modal(t("mywork.edit"), `${e.key} — ${e.summary}`, el("div", {}, body, warn), c => (close = c, [del, cancelBtn(c), save]));
+  del.onclick = async () => {
+    if (!armed) { armed = true; warn.classList.remove("hidden"); del.textContent = t("mywork.confirmBtn"); return; }
+    del.disabled = save.disabled = true;
+    try { await api("DELETE", `/api/worklogs/${e.key}/${e.id}`); close(); toast(t("mywork.deleted")); loadWeek(); fetchToday(); }
+    catch (ex) { toast(ex.message, true); del.disabled = save.disabled = false; }
+  };
+  m.form.onsubmit = async ev => {
+    ev.preventDefault(); save.disabled = del.disabled = true;
+    try {
+      await api("PUT", `/api/worklogs/${e.key}/${e.id}`, {time: time.value, started: started.value, offset: e.offset, comment: comment.value});
+      close(); toast(t("mywork.saved")); loadWeek(); fetchToday();
+    } catch (ex) { toast(ex.message, true); save.disabled = del.disabled = false; }
+  };
+  time.focus(); time.select();
+}
+
+// Log time without a timer: pick an issue, a day and a length. Same rules as the Log work dialog.
+function manualDialog(day) {
+  const todayStr = todayInZone(), d = day || todayStr;
+  const now = new Date(), hhmm = d === todayStr ? String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0") : "09:00";
+  let target = null;
+  const pick = el("button", {type: "button", className: "iconbtn", textContent: t("manual.choose") + " ▾", dir: "auto"});
+  pick.style.cssText = "width:100%;text-align:start;padding:8px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+  const search = el("input", {type: "search", placeholder: t("search.ph"), autocomplete: "off"});
+  search.style.marginTop = "6px";
+  search.onkeydown = e => { if (e.key === "Enter") e.preventDefault(); };
+  const results = el("div", {});
+  results.style.cssText = "max-height:190px;overflow:auto;margin-top:6px";
+  const panel = el("div", {className: "hidden"}, el("div", {className: "hint", textContent: t("log.pickHint")}), search, results);
+  const time = el("input", {type: "text", className: "ltr", placeholder: "1h 30m", spellcheck: false});
+  const started = el("input", {type: "datetime-local", value: `${d}T${hhmm}`});
+  const comment = el("textarea", {rows: 3, dir: "auto", placeholder: t("log.commentPh")});
+  const trans = el("select", {}, el("option", {value: "", textContent: t("log.keep", {status: "—"})}));
+  const est = el("select", {}, ...["auto", "leave", "new", "manual"].map(k => el("option", {value: k, textContent: t("est." + k)})));
+  const estVal = el("input", {type: "text", className: "ltr hidden", placeholder: t("est.value"), spellcheck: false});
+  est.onchange = () => estVal.classList.toggle("hidden", est.value !== "new" && est.value !== "manual");
+  const rows = items => {
+    results.replaceChildren();
+    if (!items.length) { results.append(el("div", {className: "note", textContent: t("list.none")})); return; }
+    for (const i of items) {
+      const b = el("button", {type: "button", className: "issue", title: i.summary},
+        el("div", {className: "t"}, el("b", {textContent: i.key, dir: "ltr"}), el("span", {className: "pill", textContent: i.status, dir: "auto"})),
+        el("div", {className: "s", dir: "auto", textContent: i.summary}));
+      b.onclick = () => { target = i; pick.textContent = `${i.key} — ${i.summary} ▾`; panel.classList.add("hidden"); loadTransitions(i); };
+      results.append(b);
+    }
+  };
+  const cards = () => timers.map(c => ({key: c.key, summary: c.summary, status: c.status}));
+  let sT;
+  search.oninput = () => {
+    clearTimeout(sT);
+    const v = search.value.trim();
+    if (v.length < 2) { rows(cards()); return; }
+    sT = setTimeout(async () => {
+      try { const r = await api("GET", "/api/issues?src=search&q=" + encodeURIComponent(v)); if (search.value.trim() === v) rows(r.issues); }
+      catch (ex) { results.replaceChildren(el("div", {className: "note", textContent: ex.message})); }
+    }, 350);
+  };
+  pick.onclick = () => { panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) { rows(cards()); search.focus(); } };
+  function loadTransitions(i) {
+    trans.replaceChildren(el("option", {value: "", textContent: t("log.keep", {status: i.status})}));
+    api("GET", `/api/issues/${i.key}/transitions`).then(list => {
+      if (target && target.key !== i.key) return;
+      for (const tt of list) trans.append(el("option", {value: tt.id, textContent: "→ " + tt.name}));
+    }).catch(() => {});
+  }
+  const body = el("div", {}, field(t("log.to"), el("div", {}, pick, panel)),
+    el("div", {className: "row"}, field(t("log.time"), time), field(t("log.started"), started)),
+    field(t("log.comment"), comment), field(t("log.status"), trans), field(t("est.label"), est), estVal);
+  const go = el("button", {type: "submit", className: "btn", textContent: t("log.btn")});
+  const m = modal(t("menu.manual"), "", body, c => [cancelBtn(c), go]);
+  m.form.onsubmit = async e => {
+    e.preventDefault();
+    if (!target) { toast(t("manual.pick"), true); return; }
+    go.disabled = true; go.textContent = t("log.posting");
+    try {
+      const r = await api("POST", "/api/worklogs", {key: target.key, time: time.value, started: started.value, comment: comment.value, transition: trans.value, estimate: est.value, estimateValue: estVal.value});
+      m.close();
+      toast(r.warning ? [r.warning, r.warning2].filter(Boolean).map(tr).join("  ·  ") : t("log.done", {time: time.value, key: target.key}), !!r.warning);
+      if (!$("#mywork").classList.contains("hidden")) loadWeek();
+      fetchToday();
+    } catch (ex) { toast(ex.message, true); go.disabled = false; go.textContent = t("log.btn"); }
+  };
+  time.focus();
+}
 
 /* ---------- boot ---------- */
 setInterval(() => fetch("/api/ping").catch(() => {}), 10000);

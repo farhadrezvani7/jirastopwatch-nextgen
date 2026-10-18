@@ -92,6 +92,8 @@ Object.assign(STR.en, {
   "hdr.pending": "Not logged yet", "hdr.pendingTip": "Time on your timer cards that has not been logged to Jira yet",
   "set.browser": "Open Jira issues in", "set.browserDefault": "System default browser", "err.openBrowser": "The chosen browser could not be started, so the default one was used.",
   "tab.queues": "Queues", "queue.none": "No queues found.",
+  "about.version": "Version {0}",
+  "log.to": "Log to issue", "log.pickHint": "Your other timers are listed; type to search every issue.",
   "set.fontSize": "Base font size", "set.shadows": "Show shadows",
   "hdr.today": "Logged today", "hdr.todayTip": "Everything you logged on Jira today, on all issues",
   "timer.today": "Today {0}", "timer.todayTip": "What you logged on this issue today",

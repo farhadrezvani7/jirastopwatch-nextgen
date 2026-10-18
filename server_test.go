@@ -553,3 +553,142 @@ func TestQueueEndpoints(t *testing.T) {
 		}
 	}
 }
+
+// The timer was running on the wrong card: the time is booked on the issue the user picks, and the
+// wrong card's timer is the one that is used up. Without a target nothing changes.
+func TestLogWorkToAnotherIssueConsumesTheSourceTimer(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var seq []string
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/rest/api/2/myself":
+			_, _ = w.Write([]byte(`{"displayName":"T","name":"me","key":"U1","timeZone":"UTC"}`))
+		case r.URL.Path == "/rest/api/2/serverInfo", r.URL.Path == "/rest/api/2/configuration":
+			w.WriteHeader(404)
+		case strings.HasSuffix(r.URL.Path, "/worklog") && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"total":0,"worklogs":[]}`))
+		default:
+			seq = append(seq, r.Method+" "+r.URL.Path)
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer jsrv.Close()
+	s := newServer()
+	app := httptest.NewServer(s.handler())
+	defer app.Close()
+	call := func(path, body string) (int, map[string]any) {
+		req, _ := http.NewRequest("POST", app.URL+path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var m map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+	if c, _ := call("/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`); c != 200 {
+		t.Fatal("login")
+	}
+	call("/api/settings", `{"timezone":"UTC"}`)
+	_ = s.timers.Add("WRONG-1", "wrong card", "p", "st")
+	_ = s.timers.SetElapsed("WRONG-1", 30*time.Minute)
+	body := func(target string) string {
+		return `{"time":"30m","started":"2026-10-17T09:00","comment":"","target":"` + target + `","transition":"31"}`
+	}
+	if c, _ := call("/api/timers/WRONG-1/log", body("not a key")); c != 400 {
+		t.Errorf("a malformed target was accepted: %d", c)
+	}
+	if g, _ := s.timers.Get("WRONG-1"); g.Elapsed(time.Now()) != 30*time.Minute || len(seq) != 0 {
+		t.Fatalf("a refused request changed something: %v %v", g.Elapsed(time.Now()), seq)
+	}
+	c, m := call("/api/timers/WRONG-1/log", body("right-7"))
+	if c != 200 || m["target"] != "RIGHT-7" {
+		t.Fatalf("log to another issue: %d %v", c, m)
+	}
+	mu.Lock()
+	got := strings.Join(seq, ",")
+	mu.Unlock()
+	if !strings.Contains(got, "POST /rest/api/2/issue/RIGHT-7/worklog") || !strings.Contains(got, "POST /rest/api/2/issue/RIGHT-7/transitions") || strings.Contains(got, "WRONG-1") {
+		t.Errorf("everything must go to the chosen issue only: %s", got)
+	}
+	if g, _ := s.timers.Get("WRONG-1"); g.Elapsed(time.Now()) != 0 {
+		t.Errorf("the wrong card's timer was not consumed: %v", g.Elapsed(time.Now()))
+	}
+	// the card's own key as target behaves like no target
+	mu.Lock()
+	seq = nil
+	mu.Unlock()
+	_ = s.timers.SetElapsed("WRONG-1", 30*time.Minute)
+	if c, m := call("/api/timers/WRONG-1/log", body("wrong-1")); c != 200 || m["target"] != "WRONG-1" {
+		t.Fatalf("own key: %d %v", c, m)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(strings.Join(seq, ","), "POST /rest/api/2/issue/WRONG-1/worklog") {
+		t.Errorf("own key did not log on the card: %v", seq)
+	}
+}
+
+// Typing an issue key character by character ("HD-7", "HD-72"...) must keep returning results, even
+// though Jira refuses a query that names an issue key that does not exist.
+func TestKeyShapedSearchFallsBackToTextWhenTheKeyDoesNotExist(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var jqls []string
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/myself":
+			_, _ = w.Write([]byte(`{"displayName":"T","name":"me","key":"U1"}`))
+		case "/rest/api/2/search":
+			jql := r.URL.Query().Get("jql")
+			mu.Lock()
+			jqls = append(jqls, jql)
+			mu.Unlock()
+			if strings.Contains(jql, `issuekey = "HD-7"`) {
+				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"errorMessages":["An issue with key 'HD-7' does not exist for field 'issuekey'."]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"issues":[{"key":"HD-70","fields":{"summary":"s","project":{"name":"P"},"status":{"name":"Open"}}}],"total":1}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer jsrv.Close()
+	s := newServer()
+	app := httptest.NewServer(s.handler())
+	defer app.Close()
+	call := func(method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, app.URL+path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: "sw", Value: s.token})
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if c, _ := call("POST", "/api/login", `{"site":"`+jsrv.URL+`","mode":"basic","email":"u","token":"p"}`); c != 200 {
+		t.Fatal("login")
+	}
+	c, b := call("GET", "/api/issues?src=search&q=HD-7", "")
+	if c != 200 || !strings.Contains(b, "HD-70") {
+		t.Fatalf("a partial key gave %d %s", c, b)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(jqls) != 2 || strings.Contains(jqls[1], "issuekey") {
+		t.Errorf("expected the key query and then a text-only retry: %v", jqls)
+	}
+}

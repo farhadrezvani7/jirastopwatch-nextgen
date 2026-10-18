@@ -102,7 +102,7 @@ func main() {
 			mu.Lock()
 			defer mu.Unlock()
 			for _, c := range cmds {
-				_ = c.Process.Kill()
+				killTree(c)
 			}
 		}
 		watch := func(c *exec.Cmd) {
@@ -221,6 +221,7 @@ func appWindow(url string) *exec.Cmd {
 			continue
 		}
 		cmd := exec.Command(path, browserArgs(runtime.GOOS, url, filepath.Join(store.Dir(), "window-profile"))...)
+		ownGroup(cmd)
 		if cmd.Start() == nil {
 			return cmd
 		}

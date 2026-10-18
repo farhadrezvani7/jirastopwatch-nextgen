@@ -118,8 +118,8 @@ main{padding:14px 20px;overflow:auto}
 .actions .x:hover{color:var(--danger);border-color:var(--danger)}
 
 aside{border-inline-start:1px solid var(--line);background:var(--nav);display:flex;flex-direction:column;min-height:0}
-.tabs{display:flex;gap:4px;padding:12px 12px 0}
-.tabs button{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;background:none;padding:8px 4px;border-radius:8px;color:var(--muted);font-weight:600}
+.tabs{display:flex;gap:2px;padding:12px 8px 0}
+.tabs button{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;background:none;padding:8px 2px;border-radius:8px;color:var(--muted);font-weight:600}
 .tabs button.on{background:var(--panel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
 .search{padding:12px}
 .filterbar{padding:0 12px 8px}
@@ -197,6 +197,8 @@ body.aside-closed #app{grid-template-columns:minmax(0,1fr)}
   [dir=rtl] aside{transform:translateX(-100%)}
   body.aside-open aside{transform:none;visibility:visible}
 }
+header .brand,.total,.clock{white-space:nowrap}
+@media (max-width:1000px){ .clock{display:none} }
 @media (max-width:520px){ .brand .bt{display:none} }
 @media (max-width:360px){ #todayBox span{display:none} }
 @media (max-width:600px){
@@ -584,7 +586,10 @@ function recoveryDialog(r) {
   form.onsubmit = e => { e.preventDefault(); answer("rewind", close); };
 }
 
+let appVersion = "";
 async function enterApp(user, sess) {
+  appVersion = (sess && sess.version) || "";
+  document.querySelector(".brand").title = appVersion ? "v" + appVersion.replace(/^v/, "") : "";
   todayByKey = {}; $("#todayTotal").textContent = "–";
   me = user; site = sess.site; pauseOthers = sess.pauseOthers; prefs = sess.prefs; clock = sess.time;
   $("#login").classList.add("hidden");
@@ -616,7 +621,8 @@ $("#userBtn").onclick = () => {
     el("label", {className: "check"}, cb, el("span", {textContent: t("set.pauseOthers")})),
     row(t("menu.settings"), () => { close(); settingsDialog(); }),
     ...(prefs.updateEnabled ? [row(t("menu.update"), () => { close(); updateFlow(); })] : []),
-    row(t("menu.signOut"), () => { close(); signOut(); }));
+    row(t("menu.signOut"), () => { close(); signOut(); }),
+    el("div", {className: "hint", dir: "ltr", style: "text-align:center;margin-top:14px", textContent: "Jira StopWatch NextGen · " + t("about.version", {0: /^\d/.test(appVersion) ? "v" + appVersion : appVersion || "?"})}));
   ({close} = modal(me.displayName, [me.emailAddress, site.replace(/^https?:\/\//, "")].filter(Boolean).join(" · "), body, () => []));
 };
 
@@ -854,7 +860,45 @@ async function logDialog(x) {
   setTimeout(showServerNote, 0);
   time.addEventListener("input", () => setTimeout(showJiraZone, 600));
   setTimeout(showJiraZone, 0);
-  const body = el("div", {}, el("div", {className: "row"}, field(t("log.time"), time), el("div", {}, field(t("log.started"), started), tz, sn, jz)),
+  // Which issue the time is booked on: normally this card's, but the timer may have been started on the wrong card.
+  let target = {key: x.key, summary: x.summary, status: x.status}, subEl = null;
+  const tgtBtn = el("button", {type: "button", className: "iconbtn", dir: "auto"});
+  tgtBtn.style.cssText = "width:100%;text-align:start;padding:8px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+  const tgtSearch = el("input", {type: "search", placeholder: t("search.ph"), autocomplete: "off"});
+  tgtSearch.style.marginTop = "6px";
+  tgtSearch.onkeydown = e => { if (e.key === "Enter") e.preventDefault(); };   // Enter must not submit the log
+  const tgtList = el("div", {});
+  tgtList.style.cssText = "max-height:190px;overflow:auto;margin-top:6px";
+  const tgtPanel = el("div", {className: "hidden"}, el("div", {className: "hint", textContent: t("log.pickHint")}), tgtSearch, tgtList);
+  const showTarget = () => {
+    tgtBtn.textContent = `${target.key} — ${target.summary} ▾`;
+    if (subEl) subEl.textContent = `${t("log.to")}: ${target.key} — ${target.summary}`;
+  };
+  const pickRows = items => {
+    tgtList.replaceChildren();
+    if (!items.length) { tgtList.append(el("div", {className: "note", textContent: t("list.none")})); return; }
+    for (const i of items) {
+      const b = el("button", {type: "button", className: "issue", title: i.summary},
+        el("div", {className: "t"}, el("b", {textContent: i.key, dir: "ltr"}), el("span", {className: "pill", textContent: i.status, dir: "auto"})),
+        el("div", {className: "s", dir: "auto", textContent: i.summary}));
+      b.onclick = () => { target = {key: i.key, summary: i.summary, status: i.status}; tgtPanel.classList.add("hidden"); showTarget(); loadTarget(); };
+      tgtList.append(b);
+    }
+  };
+  const cards = () => timers.map(c => ({key: c.key, summary: c.summary, status: c.status}));
+  let pickT;
+  tgtSearch.oninput = () => {
+    clearTimeout(pickT);
+    const v = tgtSearch.value.trim();
+    if (v.length < 2) { pickRows(cards()); return; }
+    pickT = setTimeout(async () => {
+      try { const d = await api("GET", "/api/issues?src=search&q=" + encodeURIComponent(v)); if (tgtSearch.value.trim() === v) pickRows(d.issues); }
+      catch (ex) { tgtList.replaceChildren(el("div", {className: "note", textContent: ex.message})); }
+    }, 350);
+  };
+  tgtBtn.onclick = () => { tgtPanel.classList.toggle("hidden"); if (!tgtPanel.classList.contains("hidden")) { pickRows(cards()); tgtSearch.focus(); } };
+  showTarget();
+  const body = el("div", {}, field(t("log.to"), el("div", {}, tgtBtn, tgtPanel)), el("div", {className: "row"}, field(t("log.time"), time), el("div", {}, field(t("log.started"), started), tz, sn, jz)),
     field(t("log.comment"), comment), field(t("log.status"), trans),
     field(t("est.label"), est), estVal);
   const submit = el("button", {type: "submit", className: "btn", textContent: t("log.btn")});
@@ -865,24 +909,36 @@ async function logDialog(x) {
     try {
       const r = await api("POST", `/api/timers/${x.key}/log`, {
         time: time.value, started: started.value, comment: comment.value, transition: trans.value,
-        estimate: est.value, estimateValue: estVal.value});
-      if (restart) await api("POST", `/api/timers/${x.key}/start`);
-      close(); toast((r.warning ? [r.warning, r.warning2].filter(Boolean).map(tr).join("  ·  ") : t("log.done", {time: time.value, key: x.key})) + `  ·  ${started.value.replace("T", " ")}${zoneInfo ? " " + zoneInfo.name : ""}`, !!r.warning); refresh(); fetchToday();
+        estimate: est.value, estimateValue: estVal.value, target: target.key !== x.key ? target.key : ""});
+      if (restart) {
+        // continue on the issue the time was booked on (add its card first if it is not on the list yet)
+        if (target.key !== x.key) await api("POST", "/api/timers", {key: target.key}).catch(ex => toast(ex.message, true));
+        await api("POST", `/api/timers/${target.key}/start`).catch(ex => toast(ex.message, true));
+      }
+      close(); toast((r.warning ? [r.warning, r.warning2].filter(Boolean).map(tr).join("  ·  ") : t("log.done", {time: time.value, key: target.key})) + `  ·  ${started.value.replace("T", " ")}${zoneInfo ? " " + zoneInfo.name : ""}`, !!r.warning); refresh(); fetchToday();
     } catch (ex) { toast(ex.message, true); submit.disabled = again.disabled = false; submit.textContent = t("log.btn"); }
   };
+  subEl = form.querySelector(".proj");
   form.onsubmit = e => { e.preventDefault(); doLog(false); };
   again.onclick = () => { if (form.reportValidity()) doLog(true); };
   comment.focus();
-  api("GET", `/api/issues/${x.key}/estimate`).then(r => {
-    if (!r.text) return;
-    est.options[1].textContent = `${t("est.leave")} (${r.text})`;
-    const mins = Math.max(1, Math.ceil(elapsed(x) / 60)) * 60;   // what "auto" will leave once this worklog is booked
-    est.options[0].textContent = `${t("est.auto")} (${fmt(Math.max(0, r.seconds - mins))})`;
-  }).catch(() => {});
-  try {
-    for (const tt of await api("GET", `/api/issues/${x.key}/transitions`))
-      trans.append(el("option", {value: tt.id, textContent: "→ " + tt.name}));
-  } catch {}
+  // Remaining estimate and the statuses to move to belong to the issue the time is booked on.
+  function loadTarget() {
+    const key = target.key;
+    trans.replaceChildren(el("option", {value: "", textContent: t("log.keep", {status: target.status})}));
+    est.options[0].textContent = t("est.auto"); est.options[1].textContent = t("est.leave");
+    api("GET", `/api/issues/${key}/estimate`).then(r => {
+      if (!r.text || key !== target.key) return;
+      est.options[1].textContent = `${t("est.leave")} (${r.text})`;
+      const mins = Math.max(1, Math.ceil(elapsed(x) / 60)) * 60;   // what "auto" will leave once this worklog is booked
+      est.options[0].textContent = `${t("est.auto")} (${fmt(Math.max(0, r.seconds - mins))})`;
+    }).catch(() => {});
+    api("GET", `/api/issues/${key}/transitions`).then(list => {
+      if (key !== target.key) return;
+      for (const tt of list) trans.append(el("option", {value: tt.id, textContent: "→ " + tt.name}));
+    }).catch(() => {});
+  }
+  loadTarget();
 }
 
 let zones = [], countryLang = {};   // zones: [{c: "IR", n: "Iran", z: ["Asia/Tehran"]}, ...]
@@ -1048,7 +1104,7 @@ function showJqlBar() {
 }
 $("#jqlBtn").onclick = jqlDialog;
 let qTimer;
-$("#q").oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { if (src === "queue" && !queueSel) renderQueueList(); else loadList(); }, 350); };
+$("#q").oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { if (src === "queue" && !queueSel) renderQueueList(); else if (inContext()) renderList(); else loadList(); }, 350); };
 $("#reload").onclick = () => { if (src === "filter" && !filterCombo) loadFilters(); else loadList(); };
 
 let filterCombo = null;
@@ -1057,21 +1113,26 @@ async function loadFilters() {
     try {
       const f = await api("GET", "/api/filters");
       if (!f.length) { setList([], "list.noFilters"); return; }
-      filterCombo = combo(f.map(x => ({value: x.id, label: x.name})), f[0].id, loadList);
+      filterCombo = combo(f.map(x => ({value: x.id, label: x.name})), f[0].id, () => { $("#q").value = ""; loadList(); });
       $("#filterbar").replaceChildren(filterCombo.el);
     } catch (ex) { setList([], ex.message, true); return; }
   }
   loadList();
 }
 
+const inContext = () => (src === "queue" && queueSel) || src === "filter" || (src === "all" && jqlText);
+const matchesQ = (i, q) => !q || norm([i.key, i.summary, i.status].join(" ")).includes(norm(q));
 async function loadList() {
   const seq = ++listSeq, q = $("#q").value.trim();
+  loading = false;   // this call replaces whatever was loading; an abandoned request must never leave the list stuck blank
   let url = "/api/issues?src=" + src;
   if (src === "queue" && !queueSel) { if (deskCombo) loadQueues(seq); return; }   // the list of queues itself
-  if (q) url = "/api/issues?src=search&q=" + encodeURIComponent(q);
-  else if (src === "queue") url += `&desk=${deskCombo.get()}&queue=${queueSel.id}`;
+  // A tab with something chosen (a queue, a saved filter, a JQL result) always shows that; what is typed in the
+  // search box then only narrows the loaded list (renderList). Everywhere else the box searches all of Jira.
+  if (src === "queue") url += `&desk=${deskCombo.get()}&queue=${queueSel.id}`;
   else if (src === "filter") { if (!filterCombo) return; url += "&filter=" + filterCombo.get(); }
   else if (src === "all" && jqlText) url += "&jql=" + encodeURIComponent(jqlText);
+  else if (q) url = "/api/issues?src=search&q=" + encodeURIComponent(q);
   loading = true; listBase = url; listNext = "";
   $("#list").replaceChildren(el("div", {className: "note"}, el("span", {className: "spin"})));
   try {
@@ -1091,7 +1152,7 @@ function loadQueueTab() {
   queueSel = null;
   if (!desks.length) { setList([], "queue.none"); return; }
   if (!deskCombo) {
-    deskCombo = combo(desks.map(d => ({value: d.id, label: d.name, hint: d.key, search: d.key + " " + d.name})), desks[0].id, () => { queueSel = null; showQueueBar(); loadList(); });
+    deskCombo = combo(desks.map(d => ({value: d.id, label: d.name, hint: d.key, search: d.key + " " + d.name})), desks[0].id, () => { queueSel = null; $("#q").value = ""; showQueueBar(); loadList(); });
   }
   showQueueBar(); loadList();
 }
@@ -1100,7 +1161,7 @@ function showQueueBar() {
   if (!queueSel) { bar.replaceChildren(deskCombo.el); return; }
   const back = el("button", {type: "button", className: "iconbtn", textContent: "‹", ariaLabel: "Back"});
   back.style.padding = "2px 10px";
-  back.onclick = () => { queueSel = null; showQueueBar(); loadList(); };
+  back.onclick = () => { queueSel = null; $("#q").value = ""; showQueueBar(); loadList(); };
   const name = el("b", {textContent: queueSel.name, dir: "auto", title: queueSel.name});
   name.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
   bar.replaceChildren(el("div", {style: "display:flex;gap:8px;align-items:center"}, back, name));
@@ -1146,9 +1207,10 @@ function renderList() {
   if (loading) return;
   if (src === "queue" && !queueSel) { renderQueueList(); return; }
   box.replaceChildren();
-  if (!listData.length) { box.append(el("div", {className: "note", textContent: listKey ? t(listKey) : listMsg})); return; }
+  const qv = $("#q").value.trim(), rows = inContext() ? listData.filter(i => matchesQ(i, qv)) : listData;
+  if (!rows.length) { box.append(el("div", {className: "note", textContent: listData.length ? t("list.none") : (listKey ? t(listKey) : listMsg)})); }
   const have = new Set(timers.map(x => x.key));
-  for (const i of listData) {
+  for (const i of rows) {
     const b = el("button", {className: "issue" + (have.has(i.key) ? " added" : ""), title: i.summary},
       el("div", {className: "t"}, el("b", {textContent: i.key, dir: "ltr"}), el("span", {className: "pill", textContent: i.status, dir: "auto"})),
       el("div", {className: "s", dir: "auto", textContent: i.summary}));
@@ -1255,6 +1317,9 @@ async function updateFlow() {
       if (running.length) { await api("POST", "/api/timers/pause-all"); refresh(); }
       const r = await api("POST", "/api/update/apply");
       status.textContent = t("upd.done", {0: r.version});
+      // The new copy opens its own window; this one belongs to the old version, so close it (a browser only allows
+      // this for app windows, which is what the app normally uses; otherwise the message stays for the user).
+      setTimeout(() => { try { window.close(); } catch {} }, 2500);
     } catch (ex) {
       go.disabled = false; status.textContent = ""; status.append(ex.message);
       if (ex.message === t("err.updNoWrite")) status.append(" ", el("a", {href: u.url, target: "_blank", rel: "noopener", textContent: u.url, dir: "ltr"}));

@@ -739,10 +739,21 @@ func (s *server) logWork(w http.ResponseWriter, r *http.Request) {
 		Transition string `json:"transition"`
 		Estimate   string `json:"estimate"`      // auto | leave | new | manual
 		EstimateTo string `json:"estimateValue"` // for new / manual
+		Target     string `json:"target"`        // log to this issue instead (the timer was started on the wrong card)
 	}
 	if !decode(r, &req) {
 		fail(w, 400, "err.badRequest")
 		return
+	}
+	// The time of this card's timer may belong to another issue: it is booked there, and this card's timer is
+	// the one that is consumed. Without a target (or with the card's own key) nothing changes.
+	logKey := key
+	if tk := strings.ToUpper(strings.TrimSpace(req.Target)); tk != "" && tk != key {
+		if !keyRe.MatchString(tk) {
+			fail(w, 400, "err.keyShape")
+			return
+		}
+		logKey = tk
 	}
 	d, ok := jira.ParseDuration(req.Time, s.hours())
 	if !ok || d <= 0 {
@@ -782,16 +793,16 @@ func (s *server) logWork(w http.ResponseWriter, r *http.Request) {
 			wlComment = ""
 		}
 	}
-	resp := map[string]any{"ok": true}
+	resp := map[string]any{"ok": true, "target": logKey}
 	// If an earlier attempt was cut off by the network after Jira had already saved it, retrying must
 	// not book the same time twice: an identical entry of yours (same start minute and length) counts as done.
 	s.mu.RLock()
 	me := s.user
 	s.mu.RUnlock()
-	already, _ := c.HasWorklog(r.Context(), me, key, started, d)
+	already, _ := c.HasWorklog(r.Context(), me, logKey, started, d)
 	if already {
-		resp["warning"] = "warn.alreadyLogged|" + key
-	} else if err := c.PostWorklog(r.Context(), key, started, d, wlComment, est); err != nil {
+		resp["warning"] = "warn.alreadyLogged|" + logKey
+	} else if err := c.PostWorklog(r.Context(), logKey, started, d, wlComment, est); err != nil {
 		failErr(w, err)
 		return
 	}
@@ -801,13 +812,13 @@ func (s *server) logWork(w http.ResponseWriter, r *http.Request) {
 	s.todayGen.Add(1)
 	// The separate comment goes after the worklog, so a failure here can't lose time or duplicate a comment on retry.
 	if sepComment != "" && !already {
-		if err := c.PostComment(r.Context(), key, sepComment); err != nil {
+		if err := c.PostComment(r.Context(), logKey, sepComment); err != nil {
 			resp["warning"] = "warn.comment|" + err.Error()
 			_ = s.timers.SetComment(key, sepComment) // keep the text as the timer's draft so it is not lost
 		}
 	}
 	if req.Transition != "" {
-		if err := c.DoTransition(r.Context(), key, req.Transition); err != nil {
+		if err := c.DoTransition(r.Context(), logKey, req.Transition); err != nil {
 			if resp["warning"] == nil {
 				resp["warning"] = "warn.transition|" + err.Error()
 			} else {
@@ -830,7 +841,7 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 		s.queueIssues(w, r, c)
 		return
 	}
-	var jql string
+	var jql, textOnly string
 	switch q.Get("src") {
 	case "recent":
 		jql = "issuekey in issueHistory() ORDER BY lastViewed DESC"
@@ -863,6 +874,7 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 		}
 		esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(text)
 		jql = `text ~ "` + esc + `*"`
+		textOnly = jql + " ORDER BY updated DESC"
 		if k := strings.ToUpper(text); keyRe.MatchString(k) {
 			jql = `issuekey = "` + k + `" OR ` + jql
 		}
@@ -872,6 +884,12 @@ func (s *server) issues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, next, err := c.SearchPage(r.Context(), jql, 50, q.Get("cursor"))
+	// A key-shaped search ("HD-7" while typing "HD-72399") adds `issuekey = ...`, which Jira rejects outright
+	// when no such issue exists. That must not turn the whole search into an error: search the text alone.
+	var ae *jira.APIError
+	if err != nil && textOnly != "" && errors.As(err, &ae) && ae.Status == http.StatusBadRequest {
+		res, next, err = c.SearchPage(r.Context(), textOnly, 50, q.Get("cursor"))
+	}
 	if err != nil {
 		failErr(w, err)
 		return

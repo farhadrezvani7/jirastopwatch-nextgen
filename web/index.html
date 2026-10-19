@@ -358,7 +358,9 @@ async function api(method, path, body) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch { throw new Error(t("err.appGone")); }
-  const data = await res.json().catch(() => ({}));
+  let parsed = true;
+  const data = await res.json().catch(() => { parsed = false; return {}; });
+  if (res.ok && !parsed && res.status !== 204) throw new Error(t("err.badResponse", {0: "HTTP " + res.status}));
   if (!res.ok) {
     if (res.status === 401 && path !== "/api/login" && !offlineMode) showLogin();
     const err = new Error(tr(data.error || `Error ${res.status}`));
@@ -367,6 +369,13 @@ async function api(method, path, body) {
   }
   return data;
 }
+
+// Safety net: an action whose error nobody handled still tells the user instead of failing silently.
+window.addEventListener("unhandledrejection", ev => {
+  ev.preventDefault();
+  const m = ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason || "");
+  if (m) toast(m, true);
+});
 
 function toast(msg, bad) {
   const x = el("div", {className: "toast" + (bad ? " bad" : ""), textContent: msg});
@@ -1416,6 +1425,7 @@ async function loadWeek() {
     const d = await api("GET", `/api/mywork?from=${from}&to=${to}`);
     if (seq !== mw.seq) return;
     mw.entries = d.entries; mw.fetchedAt = d.fetchedAt; renderWeek();
+    if (d.skipped && d.skipped.length) toast(t("mywork.partial", {0: d.skipped.join(", ")}), true);
   } catch (ex) { if (seq === mw.seq) $("#mwGrid").replaceChildren(el("div", {className: "note", textContent: ex.message})); }
 }
 function renderWeek() {

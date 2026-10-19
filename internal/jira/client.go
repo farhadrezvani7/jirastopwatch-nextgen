@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -119,7 +120,19 @@ func New(base, mode, identity, secret string) *Client {
 	return &Client{Base: base, Mode: mode, Identity: identity, Secret: secret,
 		// Don't follow redirects: Jira Cloud answers bad credentials with a 302 to
 		// its login page, which would otherwise come back as "200 + HTML".
-		HTTP: &http.Client{Timeout: 20 * time.Second,
+		// There is no overall Client.Timeout: it would also cut a reply that is still arriving. Each request
+		// gets its own deadline instead (requestTimeout), and the transport bounds connecting and the wait
+		// for the first byte.
+		HTTP: &http.Client{
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+				MaxIdleConns:          10,
+				IdleConnTimeout:       60 * time.Second,
+				ForceAttemptHTTP2:     true,
+			},
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
@@ -132,20 +145,81 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, body
 	return c.doH(ctx, method, path, q, body, out, nil)
 }
 
-// doH is do with extra request headers.
+// maxBody is the largest reply read from Jira; a bigger one is reported, never cut short.
+const maxBody = 32 << 20
+
+// requestTimeout bounds one request including reading its body (headers alone are bounded by the transport).
+const requestTimeout = 60 * time.Second
+
+// attempts is how often an idempotent (GET) request is tried when the answer is lost on the way.
+const attempts = 3
+
+// doH is do with extra request headers. Reads (GET) are retried when the connection drops, the reply is
+// cut off or Jira answers 429/502/503/504; anything that changes data is sent exactly once.
 func (c *Client) doH(ctx context.Context, method, path string, q url.Values, body, out any, h http.Header) error {
 	u := c.Base + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
-	var rd io.Reader
+	var payload []byte
 	if body != nil {
-		b, _ := json.Marshal(body)
-		rd = bytes.NewReader(b)
+		b, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("err.badRequest")
+		}
+		payload = b
+	}
+	tries := 1
+	if method == http.MethodGet {
+		tries = attempts
+	}
+	var err error
+	for i := 0; i < tries; i++ {
+		if i > 0 {
+			wait := time.Duration(i) * 400 * time.Millisecond
+			var ra *retryAfter
+			if errors.As(err, &ra) && ra.d > 0 {
+				wait = ra.d
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("err.unreachable|%v", ctx.Err())
+			case <-time.After(wait):
+			}
+		}
+		var retry bool
+		retry, err = c.once(ctx, method, u, payload, out, h)
+		if err == nil || !retry {
+			break
+		}
+	}
+	var ra *retryAfter
+	if errors.As(err, &ra) {
+		return ra.err
+	}
+	return err
+}
+
+// retryAfter marks an error worth another attempt (and how long Jira asked us to wait).
+type retryAfter struct {
+	err error
+	d   time.Duration
+}
+
+func (r *retryAfter) Error() string { return r.err.Error() }
+func (r *retryAfter) Unwrap() error { return r.err }
+
+// once makes a single request. The bool says whether trying again could help.
+func (c *Client) once(parent context.Context, method, u string, payload []byte, out any, h http.Header) (bool, error) {
+	ctx, cancel := context.WithTimeout(parent, requestTimeout)
+	defer cancel()
+	var rd io.Reader
+	if payload != nil {
+		rd = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, rd)
 	if err != nil {
-		return err
+		return false, fmt.Errorf("err.addrInvalid")
 	}
 	if c.Mode == ModePAT {
 		req.Header.Set("Authorization", "Bearer "+c.Secret)
@@ -156,29 +230,66 @@ func (c *Client) doH(ctx context.Context, method, path string, q url.Values, bod
 	for k, v := range h {
 		req.Header[k] = v
 	}
-	if body != nil {
+	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("err.unreachable|%v", err)
+		return parent.Err() == nil, transportErr(parent, err)
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	if err != nil {
+		// The connection broke or timed out in the middle of the reply: what we have is only a part of it.
+		return parent.Err() == nil, transportErr(parent, err)
+	}
+	if len(data) > maxBody {
+		return false, &APIError{http.StatusBadGateway, "err.tooBig"}
+	}
 	if resp.StatusCode/100 == 3 {
-		return &APIError{http.StatusUnauthorized, "err.rejected"}
+		return false, &APIError{http.StatusUnauthorized, "err.rejected"}
 	}
 	if resp.StatusCode/100 != 2 {
-		return &APIError{resp.StatusCode, errMessage(resp.StatusCode, data)}
+		e := &APIError{resp.StatusCode, errMessage(resp.StatusCode, data)}
+		switch resp.StatusCode {
+		case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			d := time.Duration(0)
+			if s, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && s > 0 {
+				d = time.Duration(min(s, 5)) * time.Second
+			}
+			return true, &retryAfter{e, d}
+		}
+		return false, e
 	}
 	// Some Jira instances answer invalid credentials with 200 and an HTML login page.
 	if out != nil && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
-		return &APIError{http.StatusUnauthorized, "err.rejected"}
+		return false, &APIError{http.StatusUnauthorized, "err.rejected"}
 	}
-	if out != nil && len(data) > 0 {
-		return json.Unmarshal(data, out)
+	if out != nil && len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, out); err != nil {
+			// Not JSON, or JSON that stops short (a proxy or gateway cutting the reply): say so plainly.
+			return true, &APIError{http.StatusBadGateway, "err.badResponse|" + err.Error()}
+		}
 	}
-	return nil
+	return false, nil
+}
+
+// transportErr turns a network failure into a message key the UI can show.
+func transportErr(parent context.Context, err error) error {
+	switch {
+	case parent.Err() != nil:
+		return fmt.Errorf("err.unreachable|%v", parent.Err())
+	case errors.Is(err, context.DeadlineExceeded) || isTimeout(err):
+		return &APIError{http.StatusGatewayTimeout, "err.timeout"}
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return &APIError{http.StatusBadGateway, "err.truncated"}
+	}
+	return fmt.Errorf("err.unreachable|%v", err)
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func errMessage(status int, data []byte) string {
@@ -427,7 +538,7 @@ func (c *Client) HasWorklog(ctx context.Context, me *User, key string, started t
 				Seconds int64  `json:"timeSpentSeconds"`
 			} `json:"worklogs"`
 		}
-		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
+		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"500"}}
 		if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(key)+"/worklog", q, nil, &res); err != nil {
 			return false, err
 		}
@@ -629,10 +740,12 @@ func ValidDay(s string) bool {
 
 // MyWorklogs returns the user's own worklogs whose started date falls in [from, to] (both "2006-01-02"),
 // oldest first, read from Jira: the issues with the user's worklogs in that range, then each issue's
-// worklogs. Nothing is estimated or converted.
-func (c *Client) MyWorklogs(ctx context.Context, me *User, from, to string) ([]WorklogEntry, error) {
+// worklogs. Nothing is estimated or converted. An issue whose worklogs could not be read does not hide the
+// rest: its key is returned in skipped and the other issues' entries are still delivered (only when
+// every issue failed, or the credentials were refused, is that an error).
+func (c *Client) MyWorklogs(ctx context.Context, me *User, from, to string) (entries []WorklogEntry, skipped []string, err error) {
 	if !ValidDay(from) || !ValidDay(to) || to < from {
-		return nil, errors.New("err.badRequest")
+		return nil, nil, errors.New("err.badRequest")
 	}
 	f, _ := time.Parse("2006-01-02", from)
 	t, _ := time.Parse("2006-01-02", to)
@@ -643,7 +756,7 @@ func (c *Client) MyWorklogs(ctx context.Context, me *User, from, to string) ([]W
 	for cursor, pages := "", 0; pages < 5; pages++ {
 		page, next, err := c.SearchPage(ctx, jql, 100, cursor)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		issues = append(issues, page...)
 		if next == "" {
@@ -656,6 +769,7 @@ func (c *Client) MyWorklogs(ctx context.Context, me *User, from, to string) ([]W
 		wg       sync.WaitGroup
 		out      []WorklogEntry
 		firstErr error
+		failed   int
 		slots    = make(chan struct{}, 6)
 	)
 	for _, is := range issues {
@@ -666,16 +780,26 @@ func (c *Client) MyWorklogs(ctx context.Context, me *User, from, to string) ([]W
 			got, err := c.issueEntries(ctx, me, is, from, to)
 			mu.Lock()
 			defer mu.Unlock()
-			if err != nil && firstErr == nil {
-				firstErr = err
+			if err != nil {
+				failed++
+				skipped = append(skipped, is.Key)
+				if firstErr == nil {
+					firstErr = err
+				}
+				return
 			}
 			out = append(out, got...)
 		}(is)
 	}
 	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
+	if ctx.Err() != nil {
+		return nil, nil, fmt.Errorf("err.unreachable|%v", ctx.Err())
 	}
+	var ae *APIError
+	if firstErr != nil && (failed == len(issues) || (errors.As(firstErr, &ae) && ae.Status == http.StatusUnauthorized)) {
+		return nil, nil, firstErr
+	}
+	sort.Strings(skipped)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Day != out[j].Day {
 			return out[i].Day < out[j].Day
@@ -685,7 +809,7 @@ func (c *Client) MyWorklogs(ctx context.Context, me *User, from, to string) ([]W
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out, nil
+	return out, skipped, nil
 }
 
 func (c *Client) issueEntries(ctx context.Context, me *User, is Issue, from, to string) ([]WorklogEntry, error) {
@@ -704,7 +828,7 @@ func (c *Client) issueEntries(ctx context.Context, me *User, is Issue, from, to 
 				Seconds   int64  `json:"timeSpentSeconds"`
 			} `json:"worklogs"`
 		}
-		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"1000"}}
+		q := url.Values{"startAt": {fmt.Sprint(startAt)}, "maxResults": {"500"}}
 		if err := c.do(ctx, "GET", "/rest/api/2/issue/"+url.PathEscape(is.Key)+"/worklog", q, nil, &res); err != nil {
 			var ae *APIError
 			if errors.As(err, &ae) && (ae.Status == 403 || ae.Status == 404) {

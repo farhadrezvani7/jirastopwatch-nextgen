@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -205,7 +207,24 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /api/filters", s.filters)
 	mux.HandleFunc("GET /api/issues/{key}/transitions", s.transitions)
 
-	return s.guard(mux)
+	return recoverPanic(s.guard(mux))
+}
+
+// recoverPanic turns a bug in one request into an error message for that request. Without it the
+// connection is just dropped and the page wrongly reports that the app has stopped.
+func recoverPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				if v == http.ErrAbortHandler {
+					panic(v)
+				}
+				log.Printf("panic serving %s %s: %v\n%s", r.Method, r.URL.Path, v, debug.Stack())
+				fail(w, http.StatusInternalServerError, "err.internal")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // guard enforces a loopback Host header (anti DNS-rebinding) and, for /api,
@@ -263,7 +282,14 @@ func failErr(w http.ResponseWriter, err error) {
 		fail(w, code, ae.Message)
 		return
 	}
-	fail(w, http.StatusBadGateway, err.Error())
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		fail(w, http.StatusGatewayTimeout, "err.timeout")
+	case errors.Is(err, context.Canceled):
+		fail(w, http.StatusBadGateway, "err.unreachable|"+err.Error())
+	default:
+		fail(w, http.StatusBadGateway, err.Error())
+	}
 }
 
 func decode(r *http.Request, v any) bool {
@@ -1325,7 +1351,7 @@ func (s *server) today(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The same read as the My work view, for one day: Jira's own worklogs, grouped by the date in their "started" text.
-	entries, err := c.MyWorklogs(r.Context(), me, day, day)
+	entries, skipped, err := c.MyWorklogs(r.Context(), me, day, day)
 	if err != nil {
 		failErr(w, err)
 		return
@@ -1336,7 +1362,14 @@ func (s *server) today(w http.ResponseWriter, r *http.Request) {
 		total += e.Seconds
 		by[e.Key] += e.Seconds
 	}
-	s.todayData = map[string]any{"total": total, "byKey": by, "date": day}
+	data := map[string]any{"total": total, "byKey": by, "date": day}
+	if len(skipped) > 0 {
+		// Some issues could not be read: show what we have, but don't keep it, so the next poll reads them again.
+		data["partial"] = true
+		writeJSON(w, 200, data)
+		return
+	}
+	s.todayData = data
 	s.todayDay, s.todayAt, s.todayFor = day, time.Now(), gen
 	writeJSON(w, 200, s.todayData)
 }

@@ -937,3 +937,12 @@ func TestSearchBuildsOneConditionPerWord(t *testing.T) {
 		}
 	}
 }
+
+func TestPanicInAHandlerBecomesAnErrorReply(t *testing.T) {
+	h := recoverPanic(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/x", nil))
+	if rec.Code != 500 || !strings.Contains(rec.Body.String(), "err.internal") {
+		t.Errorf("got %d %s", rec.Code, rec.Body.String())
+	}
+}

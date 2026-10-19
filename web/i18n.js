@@ -107,6 +107,12 @@ Object.assign(STR.en, {
   "tm.logNote": "Recorded as {time} on the Jira server's clock ({server}).",
   "log.jiraZone": "Jira shows times in your profile time zone ({zone}); this moment is {time} there.",
   "err.updCheck": "Could not check for updates: {0}", "err.updInstall": "The update failed: {0}",
+  "err.timeout": "Jira took too long to answer. Try again in a moment.",
+  "err.truncated": "Jira's reply was cut off on the way (a slow or unstable connection, or a proxy). Try again.",
+  "err.badResponse": "Jira sent a reply this app could not read ({0}). Try again; if it keeps happening, check your VPN or proxy.",
+  "err.internal": "Something went wrong inside the app. Try again; if it keeps happening, restart the app.",
+  "err.tooBig": "Jira's reply was too large to read.",
+  "mywork.partial": "Some issues could not be read and are missing from this week: {0}. Press refresh to try again.",
   "err.updNoWrite": "This copy can't update itself (it is installed in a protected folder). Download the new version here:",
 });
 

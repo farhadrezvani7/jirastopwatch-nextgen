@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -33,7 +34,9 @@ func (s *server) myWork(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	me := s.user
 	s.mu.RUnlock()
-	entries, err := c.MyWorklogs(r.Context(), me, from, to)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute) // many issues, read six at a time
+	defer cancel()
+	entries, skipped, err := c.MyWorklogs(ctx, me, from, to)
 	if err != nil {
 		failErr(w, err)
 		return
@@ -41,7 +44,10 @@ func (s *server) myWork(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []jira.WorklogEntry{}
 	}
-	writeJSON(w, 200, map[string]any{"entries": entries, "fetchedAt": time.Now().Unix()})
+	if skipped == nil {
+		skipped = []string{}
+	}
+	writeJSON(w, 200, map[string]any{"entries": entries, "skipped": skipped, "fetchedAt": time.Now().Unix()})
 }
 
 // addWorklog books time on an issue without any timer (the "Log time manually" dialog). It follows the

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -61,7 +62,7 @@ func TestMyWorklogsPagesAndFiltersByAuthorAndDay(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	logs, err := New(srv.URL, ModeBasic, "u", "p").MyWorklogs(context.Background(), &User{Name: "me"}, "2026-10-17", "2026-10-17")
+	logs, _, err := New(srv.URL, ModeBasic, "u", "p").MyWorklogs(context.Background(), &User{Name: "me"}, "2026-10-17", "2026-10-17")
 	var sum int64
 	for _, l := range logs {
 		sum += l.Seconds
@@ -135,7 +136,7 @@ func TestReadFeaturesWorkInAllThreeLoginModes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			logs, err := cl.MyWorklogs(context.Background(), me, "2026-10-17", "2026-10-17")
+			logs, _, err := cl.MyWorklogs(context.Background(), me, "2026-10-17", "2026-10-17")
 			if err != nil || len(logs) != 1 || logs[0].Seconds != 900 {
 				t.Errorf("today's worklogs (only mine): %+v err=%v", logs, err)
 			}
@@ -286,7 +287,7 @@ func TestMyWorklogsDayRuleAndOwnershipInAllThreeLoginModes(t *testing.T) {
 			defer srv.Close()
 			var me User
 			_ = json.Unmarshal([]byte(c.user), &me)
-			got, err := New(srv.URL, c.mode, c.id, c.secret).MyWorklogs(context.Background(), &me, "2026-10-15", "2026-10-17")
+			got, _, err := New(srv.URL, c.mode, c.id, c.secret).MyWorklogs(context.Background(), &me, "2026-10-15", "2026-10-17")
 			if err != nil || len(got) != 2 {
 				t.Fatalf("entries: %+v err=%v", got, err)
 			}
@@ -325,5 +326,112 @@ func TestUpdateAndDeleteWorklogRequests(t *testing.T) {
 	}
 	if !ValidDay("2026-10-17") || ValidDay("2026-13-01") || ValidDay("2026-1-1") || ValidDay("") {
 		t.Error("ValidDay")
+	}
+}
+
+// A reply that stops short (the connection drops after the headers) must be retried for reads and, if it
+// keeps failing, reported as a clear error, never as "unexpected end of JSON input".
+func TestTruncatedReplyIsRetriedAndReportedClearly(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "100")
+		_, _ = w.Write([]byte(`{"total":1,"worklo`))
+		if n < 3 {
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			return // the handler returns with 82 bytes still owed: the client sees an unexpected EOF
+		}
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, ModeBasic, "u", "p").Remaining(context.Background(), "A-1")
+	if err == nil || strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Fatalf("err = %v", err)
+	}
+	if calls.Load() != attempts {
+		t.Errorf("calls = %d, want %d", calls.Load(), attempts)
+	}
+	if !strings.HasPrefix(err.Error(), "err.truncated") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestReadIsRetriedAfterGatewayError(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"fields":{"timetracking":{"remainingEstimate":"2h","remainingEstimateSeconds":7200}}}`))
+	}))
+	defer srv.Close()
+	e, err := New(srv.URL, ModeBasic, "u", "p").Remaining(context.Background(), "A-1")
+	if err != nil || e.Seconds != 7200 || calls.Load() != 2 {
+		t.Errorf("%+v %v calls=%d", e, err, calls.Load())
+	}
+}
+
+// Changing data is never repeated automatically: a retried POST could book the same time twice.
+func TestWriteIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, ModeBasic, "u", "p").DeleteWorklog(context.Background(), "A-1", "10")
+	if err == nil || calls.Load() != 1 {
+		t.Errorf("err=%v calls=%d", err, calls.Load())
+	}
+}
+
+func TestBodyThatIsNotJSONIsReportedClearly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"fields":`))
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, ModeBasic, "u", "p").Remaining(context.Background(), "A-1")
+	if err == nil || !strings.HasPrefix(err.Error(), "err.badResponse|") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// One issue whose worklogs cannot be read must not hide the rest of the week.
+func TestMyWorklogsKeepsGoodIssuesWhenOneFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/api/2/search", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"issues":[{"key":"A-1","fields":{}},{"key":"B-2","fields":{}}]}`))
+	})
+	mux.HandleFunc("/rest/api/2/issue/A-1/worklog", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"total":1,"worklogs":[{"author":{"name":"me"},"started":"2026-10-17T09:00:00.000+0000","timeSpentSeconds":600}]}`))
+	})
+	mux.HandleFunc("/rest/api/2/issue/B-2/worklog", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	logs, skipped, err := New(srv.URL, ModeBasic, "u", "p").MyWorklogs(context.Background(), &User{Name: "me"}, "2026-10-17", "2026-10-17")
+	if err != nil || len(logs) != 1 || len(skipped) != 1 || skipped[0] != "B-2" {
+		t.Errorf("logs=%+v skipped=%v err=%v", logs, skipped, err)
+	}
+}
+
+func TestMyWorklogsFailsWhenEveryIssueFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/api/2/search", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"issues":[{"key":"A-1","fields":{}}]}`))
+	})
+	mux.HandleFunc("/rest/api/2/issue/A-1/worklog", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	_, _, err := New(srv.URL, ModeBasic, "u", "p").MyWorklogs(context.Background(), &User{Name: "me"}, "2026-10-17", "2026-10-17")
+	if err == nil {
+		t.Error("expected an error")
 	}
 }

@@ -110,8 +110,11 @@ func downloadUpdate(ctx context.Context, tag, exe string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sums, _ := io.ReadAll(sumsBody)
+	sums, err := io.ReadAll(sumsBody)
 	sumsBody.Close()
+	if err != nil {
+		return "", fmt.Errorf("could not read the checksum list: %w", err)
+	}
 	want, ok := checksumFor(string(sums), name)
 	if !ok {
 		return "", fmt.Errorf("no checksum published for %s", name)

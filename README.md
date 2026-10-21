@@ -5,7 +5,10 @@
 **A fast, modern time tracker for Jira — for Windows and Linux.** (macOS support is built but not available yet: see [macOS](#macos).)
 
 [![CI](https://github.com/farhadrezvani7/jirastopwatch-nextgen/actions/workflows/ci.yml/badge.svg)](https://github.com/farhadrezvani7/jirastopwatch-nextgen/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/farhadrezvani7/jirastopwatch-nextgen)](https://github.com/farhadrezvani7/jirastopwatch-nextgen/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational)](#install-two-clicks)
 
 [English](README.md) · [فارسی](README.fa.md)
 

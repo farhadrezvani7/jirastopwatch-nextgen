@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in the profile window (top right).
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, Linux, macOS]
+    validations:
+      required: true
+  - type: dropdown
+    id: jira
+    attributes:
+      label: Jira type
+      options: [Jira Cloud, Jira Server / Data Center, Not sure]
+  - type: markdown
+    attributes:
+      value: Please do not paste API tokens, passwords or private issue content.
